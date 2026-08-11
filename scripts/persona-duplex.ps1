@@ -35,6 +35,42 @@ function Invoke-Compose([Parameter(ValueFromRemainingArguments=$true)][string[]]
   if ($LASTEXITCODE -ne 0) { throw "docker compose failed: $LASTEXITCODE" }
 }
 
+function Test-DockerReady {
+  try { & docker info *> $null } catch {}
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-Docker {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker CLI가 없습니다." }
+
+  if (Test-DockerReady) { return }
+
+  $desktopCandidates = @(
+    (Join-Path ${env:ProgramFiles} "Docker\Docker\Docker Desktop.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\Docker\Docker Desktop.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\DockerDesktop\Docker Desktop.exe")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+  if ($desktopCandidates.Count -eq 0) {
+    throw "Docker Desktop을 찾지 못했습니다. Docker Desktop을 설치하고 다시 실행하세요."
+  }
+
+  $desktopRunning = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "Docker Desktop" }
+  if (-not $desktopRunning) {
+    Write-Host "Docker Desktop을 시작합니다..."
+    Start-Process -FilePath $desktopCandidates[0] -WorkingDirectory (Split-Path -Parent $desktopCandidates[0]) | Out-Null
+  }
+
+  $deadline = (Get-Date).AddSeconds(180)
+  do {
+    Start-Sleep -Seconds 3
+    if (Test-DockerReady) {
+      Write-Host "Docker Desktop 준비 완료"
+      return
+    }
+  } while ((Get-Date) -lt $deadline)
+  throw "Docker Desktop 데몬 준비 시간 초과입니다. Docker Desktop 상태를 확인하세요."
+}
+
 function Wait-Http([string]$Url, [int]$TimeoutSec = 180) {
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   do {
@@ -73,7 +109,8 @@ function Ensure-Ollama {
 
   if (-not $hostReady) {
     Write-Host "Ollama 서버를 시작합니다..."
-    Invoke-Compose --profile local-llm up -d ollama
+    $ollamaComposeArgs = @("--profile", "local-llm", "up", "-d", "ollama")
+    Invoke-Compose @ollamaComposeArgs
     Wait-Http "$ollamaBase/api/tags" 180
   }
 
@@ -243,10 +280,8 @@ function Stop-AllServices {
 
 if ($Action -eq "doctor") {
   Write-Host "== Persona Duplex doctor =="
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker가 없습니다." }
+  Ensure-Docker
   & docker compose version
-  & docker info | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Docker Desktop 데몬에 연결할 수 없습니다." }
   if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
     & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
   } else { Write-Warning "nvidia-smi를 찾지 못했습니다." }
@@ -257,6 +292,7 @@ if ($Action -eq "doctor") {
 
 if ($Action -eq "start") {
   Ensure-Env
+  Ensure-Docker
   Start-RequestedMode $Mode
   Write-UiUrls
   exit 0
@@ -264,6 +300,7 @@ if ($Action -eq "start") {
 
 if ($Action -eq "run") {
   Ensure-Env
+  Ensure-Docker
   Write-Host "Persona Duplex를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
   try {
     Start-RequestedMode $Mode -Foreground

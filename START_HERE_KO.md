@@ -72,7 +72,7 @@ http://localhost:8080
 .\persona-duplex.ps1 start accuracy
 ```
 
-더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. 기본 모드는 `balanced`이며, Ollama·ASR·TTS 모델이 준비될 때까지 자동으로 대기합니다. 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다. `mock`은 실전 실행 경로가 아닌 자동화 테스트용입니다.
+더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. Docker Desktop이 꺼져 있으면 실행기가 먼저 시작하고, 기본 모드 `balanced`로 Ollama·ASR·TTS 모델이 준비될 때까지 자동으로 대기합니다. Compose 서비스는 재부팅 후 자동 시작하지 않으며, 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다. `mock`은 실전 실행 경로가 아닌 자동화 테스트용입니다.
 
 클라우드 STT를 쓸 때는 `.env`에 해당 키를 입력한 뒤 실행합니다.
 

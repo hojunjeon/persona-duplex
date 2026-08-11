@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
     extra_hosts:
@@ -70,7 +70,7 @@ services:
     build:
       context: .
       dockerfile: services/qwen_asr/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     ipc: host
     environment:
       HF_HOME: /cache/huggingface
@@ -104,7 +104,7 @@ services:
   ollama:
     profiles: ["local-llm"]
     image: ollama/ollama:latest
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     environment:
@@ -151,7 +151,7 @@ services:
     build:
       context: .
       dockerfile: services/qwen_tts/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     ipc: host
     environment:
       HF_HOME: /cache/huggingface
