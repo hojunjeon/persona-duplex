@@ -37,13 +37,13 @@
 
 | 환경 | 권장 시작 모드 |
 |---|---|
-| GPU 없이 UI와 상태 머신만 검사 | `mock` |
+| GPU 없이 UI와 상태 머신만 검사 | 자동화 테스트용 `mock` |
 | VRAM이 빠듯함 | 클라우드 STT + 로컬 Qwen TTS |
 | 중간급 GPU, 로컬 우선 | Qwen3-ASR 0.6B `balanced` |
 | 여유 있는 GPU, 정확도 우선 | Qwen3-ASR 1.7B `accuracy` |
 | 실제 사용자 음성으로 후보 비교 완료 | `selected` |
 
-로컬 ASR, Qwen TTS, 8B LLM을 한 GPU에 모두 올리면 VRAM 경쟁이 심합니다. 이 경우 LLM은 Ollama에서 CPU/GPU 분할을 쓰거나 원격 OpenAI 호환 엔드포인트를 사용하고, STT는 클라우드 모드로 빼는 구성이 실용적입니다.
+로컬 ASR, Qwen TTS, Ollama `qwen3:1.7b`를 한 GPU에 올리는 구성을 기본 실전 경로로 사용합니다. 더 큰 LLM이 필요하면 `.env`의 모델을 바꾸되, 8GB VRAM에서는 모델 간 경쟁으로 warmup이 실패할 수 있습니다.
 
 ## Windows PowerShell 시작
 
@@ -51,10 +51,9 @@
 
 ```powershell
 Copy-Item .env.example .env
-ollama pull qwen3:8b
 
 .\persona-duplex.ps1 doctor
-.\persona-duplex.ps1 start mock
+.\persona-duplex.ps1 start balanced
 ```
 
 브라우저에서 다음 주소를 엽니다.
@@ -63,7 +62,7 @@ ollama pull qwen3:8b
 http://localhost:8080
 ```
 
-Mock 모드에서 화면·마이크·WebSocket·오디오 큐가 정상인지 확인한 뒤 실제 모델을 시작합니다.
+실행기는 Ollama `qwen3:1.7b`와 Qwen ASR/TTS 모델을 자동으로 다운로드·warmup하고, 세 모델이 준비된 뒤에만 UI 주소를 준비 완료로 표시합니다.
 
 ```powershell
 # 로컬 균형 모드
@@ -73,7 +72,7 @@ Mock 모드에서 화면·마이크·WebSocket·오디오 큐가 정상인지 �
 .\persona-duplex.ps1 start accuracy
 ```
 
-더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. 기본 모드는 `balanced`이며, GPU가 없는 경우에는 `persona-duplex.bat mock`을 사용합니다. 모드 인자를 생략하면 `balanced`로 실행되고, 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다.
+더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. 기본 모드는 `balanced`이며, Ollama·ASR·TTS 모델이 준비될 때까지 자동으로 대기합니다. 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다. `mock`은 실전 실행 경로가 아닌 자동화 테스트용입니다.
 
 클라우드 STT를 쓸 때는 `.env`에 해당 키를 입력한 뒤 실행합니다.
 
@@ -95,10 +94,8 @@ Mock 모드에서 화면·마이크·WebSocket·오디오 큐가 정상인지 �
 
 ```bash
 cp .env.example .env
-ollama pull qwen3:8b
 
 ./persona-duplex.sh doctor
-./persona-duplex.sh start mock
 ./persona-duplex.sh start balanced
 ```
 

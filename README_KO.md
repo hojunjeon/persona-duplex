@@ -11,7 +11,7 @@
 - 별도 저음량 오디오 채널의 AI 추임새
 - Qwen3-ASR 0.6B/1.7B 로컬 스트리밍
 - ElevenLabs, Soniox, Deepgram 실시간 STT 어댑터
-- OpenAI 호환 스트리밍 LLM 엔드포인트. 기본값은 Ollama `qwen3:8b`
+- OpenAI 호환 스트리밍 LLM 엔드포인트. 기본값은 Ollama `qwen3:1.7b`
 - Qwen3-TTS full ICL 음성 프롬프트 캐시
 - `faster-qwen3-tts` 진짜 오디오 청크 스트리밍, 공식 `qwen-tts` 전체 절 fallback
 - 본인 음성 기반 한국어 STT CER·지연 벤치마크와 자동 선발
@@ -35,7 +35,6 @@ docs/                    설계·튜닝·보안·한계 문서
 ```bash
 cp .env.example .env
 ./persona-duplex.sh doctor
-./persona-duplex.sh start mock
 ./persona-duplex.sh start balanced
 ```
 
@@ -44,7 +43,6 @@ Windows:
 ```powershell
 Copy-Item .env.example .env
 .\persona-duplex.ps1 doctor
-.\persona-duplex.ps1 start mock
 .\persona-duplex.ps1 start balanced
 ```
 
@@ -54,7 +52,7 @@ Copy-Item .env.example .env
 persona-duplex.bat
 ```
 
-기본값은 `balanced` 모드이며, 창에서 `Ctrl+C`를 누르면 실행된 Compose 서비스가 정리됩니다. GPU가 없으면 `persona-duplex.bat mock`으로 UI와 상태 머신만 실행할 수 있습니다. `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`도 첫 번째 인자로 선택할 수 있습니다.
+기본값은 `balanced` 모드이며, 실행기가 Ollama `qwen3:1.7b`와 Qwen ASR/TTS 모델을 준비한 뒤 실제 스택이 준비될 때까지 기다립니다. 창에서 `Ctrl+C`를 누르면 실행된 Compose 서비스가 정리됩니다. `mock`은 자동화 테스트 전용으로 남겨 두었고, `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`도 첫 번째 인자로 선택할 수 있습니다.
 
 UI는 `http://localhost:8080`, STT 녹음 벤치마크는 `http://localhost:8080/benchmark`입니다.
 

@@ -12,12 +12,14 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 MODEL_ID = os.getenv("ASR_MODEL_ID", "Qwen/Qwen3-ASR-1.7B")
 PORT = int(os.getenv("ASR_PORT", "8101"))
-GPU_MEMORY_UTILIZATION = float(os.getenv("ASR_GPU_MEMORY_UTILIZATION", "0.45"))
+GPU_MEMORY_UTILIZATION = float(os.getenv("ASR_GPU_MEMORY_UTILIZATION", "0.75"))
 CHUNK_SIZE_SEC = float(os.getenv("ASR_CHUNK_SIZE_SEC", "0.5"))
 UNFIXED_CHUNK_NUM = int(os.getenv("ASR_UNFIXED_CHUNK_NUM", "2"))
 UNFIXED_TOKEN_NUM = int(os.getenv("ASR_UNFIXED_TOKEN_NUM", "5"))
 DEFAULT_LANGUAGE = os.getenv("ASR_LANGUAGE", "Korean")
 MAX_NEW_TOKENS = int(os.getenv("ASR_MAX_NEW_TOKENS", "64"))
+MAX_MODEL_LEN = int(os.getenv("ASR_MAX_MODEL_LEN", "2048"))
+ENFORCE_EAGER = os.getenv("ASR_ENFORCE_EAGER", "true").lower() in {"1", "true", "yes", "on"}
 
 app = FastAPI(title="Persona Duplex Qwen ASR", version="1.0")
 _model: Any = None
@@ -49,6 +51,8 @@ def _load_model() -> Any:
                 gpu_memory_utilization=GPU_MEMORY_UTILIZATION,
                 max_inference_batch_size=1,
                 max_new_tokens=MAX_NEW_TOKENS,
+                max_model_len=MAX_MODEL_LEN,
+                enforce_eager=ENFORCE_EAGER,
             )
             _model_error = None
             return _model

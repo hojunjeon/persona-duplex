@@ -11,7 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python3 -m venv /opt/venv
 
 RUN pip install --upgrade pip setuptools wheel \
-    && pip install "qwen-asr[vllm]==0.0.6" fastapi==0.128.2 "uvicorn[standard]==0.48.0" numpy==2.3.5
+    && pip install "qwen-asr[vllm]==0.0.6" fastapi==0.128.2 "uvicorn[standard]==0.48.0" numpy==2.2.6
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY services/qwen_asr/server.py /app/server.py

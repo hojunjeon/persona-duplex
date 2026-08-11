@@ -34,7 +34,7 @@ services:
       LLM_MODE: ${LLM_MODE:-openai_compatible}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
-      LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:1.7b}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.75}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-260}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
@@ -75,14 +75,18 @@ services:
     environment:
       HF_HOME: /cache/huggingface
       ASR_MODEL_ID: ${ASR_MODEL_ID:-Qwen/Qwen3-ASR-0.6B}
-      ASR_GPU_MEMORY_UTILIZATION: ${ASR_GPU_MEMORY_UTILIZATION:-0.35}
+      ASR_GPU_MEMORY_UTILIZATION: ${ASR_GPU_MEMORY_UTILIZATION:-0.75}
       ASR_CHUNK_SIZE_SEC: ${ASR_CHUNK_SIZE_SEC:-0.40}
       ASR_UNFIXED_CHUNK_NUM: ${ASR_UNFIXED_CHUNK_NUM:-2}
       ASR_UNFIXED_TOKEN_NUM: ${ASR_UNFIXED_TOKEN_NUM:-5}
       ASR_MAX_NEW_TOKENS: ${ASR_MAX_NEW_TOKENS:-64}
+      ASR_MAX_MODEL_LEN: ${ASR_MAX_MODEL_LEN:-2048}
+      ASR_ENFORCE_EAGER: ${ASR_ENFORCE_EAGER:-true}
       ASR_LANGUAGE: ${STT_LANGUAGE:-Korean}
     volumes:
       - hf-cache:/cache/huggingface
+    ports:
+      - "127.0.0.1:${ASR_PORT:-8101}:8101"
     deploy:
       resources:
         reservations:
@@ -90,6 +94,35 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    networks: [voice-net]
+
+  ollama:
+    profiles: ["local-llm"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama-cache:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
     networks: [voice-net]
 
   stt-benchmark:
@@ -132,6 +165,8 @@ services:
     volumes:
       - hf-cache:/cache/huggingface
       - ./data/voices:/data/voices
+    ports:
+      - "127.0.0.1:${TTS_PORT:-8102}:8102"
     deploy:
       resources:
         reservations:
@@ -139,6 +174,11 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
     networks: [voice-net]
 
 networks:
@@ -147,3 +187,4 @@ networks:
 
 volumes:
   hf-cache:
+  ollama-cache:
