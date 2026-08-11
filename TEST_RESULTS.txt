@@ -1,0 +1,29 @@
+Persona Duplex validation results
+Date: 2026-08-11
+
+PASS  Python compileall: gateway, services, benchmark, tests
+PASS  Pytest: 22 tests passed
+PASS  Browser JavaScript syntax: app.js
+PASS  AudioWorklet JavaScript syntax: pcm-worklet.js
+PASS  Benchmark page inline JavaScript syntax
+PASS  Docker Compose YAML parse: 4 services
+PASS  Shell syntax: persona-duplex.sh, scripts/persona-duplex.sh, benchmark-stt.sh
+PASS  STT landscape CSV schema/read: 18 candidates
+PASS  Live mock gateway HTTP: /api/config and /api/health
+PASS  Mock conversation WebSocket lifecycle and binary audio framing (pytest)
+PASS  Consecutive-user-utterance serialization and stale-response suppression
+PASS  Short acknowledgement during prior STT finalization does not reset decoder state
+PASS  Qwen3-ASR mutable streaming-state contract test
+PASS  Official qwen-tts reusable prompt API contract test
+PASS  faster-qwen3-tts ref_audio/ref_text streaming API contract test
+PASS  ElevenLabs commit-tail buffering boundary test
+PASS  STT CER/WER metrics and provider selector tests
+PASS  Synthetic benchmark selection and .env application
+PASS  Secret-shaped token scan
+
+SKIP  Docker image build/run: Docker CLI is unavailable in this execution environment
+SKIP  PowerShell parser/runtime: pwsh is unavailable in this execution environment
+SKIP  NVIDIA model inference: no NVIDIA GPU/model cache is available here
+SKIP  Paid STT live calls: no user API keys or user benchmark recordings were supplied
+
+Important: static, unit, mock HTTP/WebSocket, and selection-path validation passed. Actual Qwen3-ASR/Qwen3-TTS GPU inference and paid-provider accuracy/latency must be measured on the target machine with the user's recordings. The package includes the exact benchmark and automatic selection workflow for that step.

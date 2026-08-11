@@ -1,0 +1,4 @@
+audio_path,reference
+samples/01_clean.wav,오늘 회의에서는 실시간 음성 대화 봇의 지연 시간을 확인하겠습니다.
+samples/02_numbers.wav,주문 번호는 에이 비 씨 일 이 삼 사 오이고 금액은 삼만 오천 원입니다.
+samples/03_names.wav,큐웬 티티에스와 올라마를 연결해 페르소나 음성 봇을 실행합니다.

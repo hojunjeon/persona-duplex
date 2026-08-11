@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Persona Duplex</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Persona Duplex</h1>
+        <div class="subtitle">사용자 목소리 제로샷 복제 + 실시간 끼어들기 + 페르소나 음성 대화</div>
+      </div>
+      <div>
+        <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">정지</span></div>
+        <div id="runtimeInfo" class="runtime-info">구성 불러오는 중</div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>1. 목소리 등록</h2>
+        <div class="field">
+          <label for="voiceName">프로필 이름</label>
+          <input id="voiceName" value="내 목소리" maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="referenceText">녹음하면서 정확히 읽을 문장</label>
+          <textarea id="referenceText">안녕하세요. 지금 제 목소리를 복제하기 위한 기준 음성을 녹음하고 있습니다. 저는 평소 말하는 속도와 높이로 또렷하고 자연스럽게 이 문장을 읽고 있습니다.</textarea>
+        </div>
+        <div class="actions">
+          <button id="recordReference" class="primary">기준 음성 녹음</button>
+          <button id="stopReference" disabled>녹음 종료</button>
+          <span id="recordTimer" class="timer">00:00.0</span>
+        </div>
+        <audio id="referencePreview" controls style="width:100%;margin-top:10px"></audio>
+        <div class="field" style="margin-top:12px">
+          <label class="checkbox"><input id="consent" type="checkbox" /> 이 목소리는 본인 것이거나, 복제·합성에 대한 명시적 허가를 받았습니다.</label>
+        </div>
+        <div class="actions">
+          <button id="enrollVoice">이 녹음으로 프로필 생성</button>
+          <button id="refreshVoices">목록 새로고침</button>
+        </div>
+        <div id="enrollMessage" class="small" style="margin-top:9px"></div>
+        <div id="voiceList" class="voice-list"></div>
+        <p class="notice"><strong>권장:</strong> 8~20초, 한 사람, 같은 마이크 거리, 배경 음악 없음. 대본과 실제 발화가 다르면 음색보다 발음 사고가 더 충실히 복제될 수 있습니다.</p>
+      </section>
+
+      <section class="panel conversation">
+        <div>
+          <h2>2. 실시간 대화</h2>
+          <div class="controls">
+            <div>
+              <label for="personaSelect">페르소나</label>
+              <select id="personaSelect"></select>
+            </div>
+            <div>
+              <label for="voiceSelect">사용할 목소리</label>
+              <select id="voiceSelect"></select>
+            </div>
+            <div class="actions">
+              <button id="startConversation" class="primary">대화 시작</button>
+              <button id="stopConversation" class="danger" disabled>중지</button>
+            </div>
+          </div>
+          <div class="meter" style="margin-top:12px"><div id="micMeter"></div></div>
+          <div class="metrics">
+            <div><span>STT 확정</span><strong id="metricStt">-</strong></div>
+            <div><span>LLM 첫 토큰</span><strong id="metricLlm">-</strong></div>
+            <div><span>첫 음성</span><strong id="metricAudio">-</strong></div>
+          </div>
+        </div>
+        <div id="chatLog" class="log"><div class="bubble system">목소리를 등록하고 대화를 시작하세요. 마이크는 AI가 말할 때도 계속 열려 있어 끼어들 수 있습니다.</div></div>
+        <div id="liveTranscript" class="live-transcript">인식 대기</div>
+        <div class="small">AI가 말하는 중 짧게 “응” 하면 음량만 잠깐 낮아지고, 계속 말하면 답변이 취소됩니다. 추임새는 별도 저음량 채널로 재생됩니다. 스피커보다 헤드폰에서 에코 제거가 훨씬 안정적입니다.</div>
+      </section>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

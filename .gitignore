@@ -1,0 +1,13 @@
+.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# User recordings, generated voice profiles, and benchmark results.
+data/benchmark/manifest.csv
+data/benchmark/samples/*
+!data/benchmark/samples/.gitkeep
+data/results/*
+!data/results/.gitkeep
+data/voices/*
+!data/voices/.gitkeep

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Persona Duplex · STT 벤치마크 녹음</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .bench { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .sample { display:grid; grid-template-columns:56px 1fr auto; gap:12px; align-items:center; padding:14px; border:1px solid var(--border); border-radius:14px; margin:10px 0; }
+    .sample.done { border-color:#4b9f76; }
+    .sample .id { font-weight:800; font-variant-numeric:tabular-nums; }
+    .sample .text { line-height:1.55; }
+    .topline { display:flex; justify-content:space-between; gap:16px; align-items:center; flex-wrap:wrap; }
+    .recording { animation:pulse 1s infinite alternate; }
+    @keyframes pulse { from { opacity:.55 } to { opacity:1 } }
+  </style>
+</head>
+<body>
+  <main class="bench">
+    <div class="topline">
+      <div><h1>한국어 STT 벤치마크 녹음</h1><p class="subtitle">실제 사용자의 말투·마이크·방 환경으로 후보를 비교합니다.</p></div>
+      <a href="/">← 대화 화면</a>
+    </div>
+    <section class="panel">
+      <p class="notice"><strong>방법:</strong> 각 문장을 평소 대화하듯 한 번 읽고 종료하세요. 같은 마이크와 거리로 최소 10개를 저장해야 결과가 덜 우연해집니다. 녹음은 로컬 서버의 <code>data/benchmark</code>에만 저장됩니다.</p>
+      <div id="progress" class="small">저장 상태 확인 중</div>
+      <div id="samples"></div>
+    </section>
+  </main>
+<script>
+const sentences = [
+  "안녕하세요. 오늘은 실시간 음성 인식 성능을 확인하고 있습니다.",
+  "잠깐만, 그 설명에서 두 번째 조건을 다시 말해 줄래?",
+  "오늘 오후 세 시 삼십 분에 서버 점검 일정을 등록해 줘.",
+  "Docker 컨테이너와 WebSocket 연결 상태를 먼저 확인하겠습니다.",
+  "가격은 십이만 삼천오백 원이고 할인율은 십오 퍼센트입니다.",
+  "Qwen TTS가 첫 음성을 내보내기까지 걸린 시간을 측정해 봐.",
+  "서울에서 부산까지 가는 가장 빠른 방법을 간단히 알려 줘.",
+  "음, 그렇구나. 그런데 지금 말한 결론에는 동의하지 않아.",
+  "이메일 주소와 영문 약어가 섞여도 정확히 받아쓰는지 보자.",
+  "배경 소음이 조금 있어도 문장 끝의 받침을 놓치지 않았으면 좋겠어.",
+  "사용자가 중간에 끼어들면 이전 답변을 즉시 멈추고 새 질문을 들어야 해.",
+  "마지막 문장입니다. 자연스러운 속도와 평소 높낮이로 읽었습니다."
+];
+const root = document.getElementById('samples');
+const progress = document.getElementById('progress');
+let active = null;
+let saved = new Set();
+
+async function refresh() {
+  const response = await fetch('/api/benchmark/samples');
+  const rows = await response.json();
+  saved = new Set(rows.map(x => x.sample_id));
+  render();
+  progress.textContent = `${saved.size}/${sentences.length}개 저장됨 · 최소 10개 권장`;
+}
+
+function render() {
+  root.innerHTML = '';
+  sentences.forEach((text, index) => {
+    const id = String(index + 1).padStart(2, '0');
+    const row = document.createElement('div');
+    row.className = `sample ${saved.has(id) ? 'done' : ''}`;
+    row.innerHTML = `<div class="id">${id}</div><div class="text"></div><button>${saved.has(id) ? '다시 녹음' : '녹음'}</button>`;
+    row.querySelector('.text').textContent = text;
+    row.querySelector('button').onclick = () => record(id, text, row);
+    root.appendChild(row);
+  });
+}
+
+async function record(id, reference, row) {
+  if (active) return;
+  const stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+  const choices = ['audio/webm;codecs=opus','audio/webm','audio/mp4'];
+  const mime = choices.find(x => MediaRecorder.isTypeSupported(x)) || '';
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, mime ? {mimeType:mime} : undefined);
+  const button = row.querySelector('button');
+  active = {recorder, stream};
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    button.disabled = true;
+    button.textContent = '저장 중';
+    try {
+      const blob = new Blob(chunks, {type:recorder.mimeType || 'audio/webm'});
+      const form = new FormData();
+      form.append('sample_id', id);
+      form.append('reference', reference);
+      form.append('audio', blob, `${id}.webm`);
+      const response = await fetch('/api/benchmark/samples', {method:'POST', body:form});
+      if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
+      saved.add(id);
+      await refresh();
+    } catch (error) {
+      alert(`저장 실패: ${error.message}`);
+      render();
+    } finally {
+      stream.getTracks().forEach(t => t.stop());
+      active = null;
+    }
+  };
+  recorder.start(200);
+  button.textContent = '읽은 뒤 종료';
+  button.classList.add('recording');
+  button.onclick = () => recorder.stop();
+}
+refresh().catch(e => { progress.textContent = `초기화 실패: ${e.message}`; });
+</script>
+</body>
+</html>

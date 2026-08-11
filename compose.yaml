@@ -1,0 +1,149 @@
+name: persona-duplex
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8080
+      PERSONA_DIR: /app/personas
+      DEFAULT_PERSONA: ${DEFAULT_PERSONA:-default}
+      BENCHMARK_DIR: /data/benchmark
+      STT_MODE: ${STT_MODE:-qwen_ws}
+      STT_WS_URL: ${STT_WS_URL:-ws://qwen-asr:8101/ws}
+      STT_HTTP_URL: ${STT_HTTP_URL:-http://qwen-asr:8101}
+      STT_LANGUAGE: ${STT_LANGUAGE:-Korean}
+      STT_API_KEY: ${STT_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      SONIOX_API_KEY: ${SONIOX_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      STT_CLOUD_MODEL: ${STT_CLOUD_MODEL:-scribe_v2_realtime}
+      STT_CLOUD_LANGUAGE_CODE: ${STT_CLOUD_LANGUAGE_CODE:-ko}
+      TTS_MODE: ${TTS_MODE:-qwen_ws}
+      TTS_WS_URL: ${TTS_WS_URL:-ws://qwen-tts:8102/ws/synthesize}
+      TTS_HTTP_URL: ${TTS_HTTP_URL:-http://qwen-tts:8102}
+      TTS_LANGUAGE: ${TTS_LANGUAGE:-Korean}
+      TTS_CHUNK_SIZE: ${TTS_CHUNK_SIZE:-4}
+      LLM_MODE: ${LLM_MODE:-openai_compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.75}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-260}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+      LLM_EXTRA_BODY_JSON: ${LLM_EXTRA_BODY_JSON:-}
+      BARGE_IN_CONFIRM_MS: ${BARGE_IN_CONFIRM_MS:-420}
+      SHORT_BACKCHANNEL_MAX_MS: ${SHORT_BACKCHANNEL_MAX_MS:-850}
+      EMPTY_BACKCHANNEL_MAX_MS: ${EMPTY_BACKCHANNEL_MAX_MS:-320}
+      BACKCHANNEL_AFTER_MS: ${BACKCHANNEL_AFTER_MS:-1900}
+      BACKCHANNEL_COOLDOWN_MS: ${BACKCHANNEL_COOLDOWN_MS:-3300}
+      BACKCHANNEL_ENABLED: ${BACKCHANNEL_ENABLED:-true}
+      PRE_ROLL_MS: ${PRE_ROLL_MS:-440}
+      VAD_START_FRAMES: ${VAD_START_FRAMES:-3}
+      VAD_END_MS_ASSISTANT: ${VAD_END_MS_ASSISTANT:-300}
+      VAD_END_MS_IDLE: ${VAD_END_MS_IDLE:-520}
+      VAD_THRESHOLD_MIN: ${VAD_THRESHOLD_MIN:-0.012}
+      VAD_NOISE_MULTIPLIER_ASSISTANT: ${VAD_NOISE_MULTIPLIER_ASSISTANT:-3.4}
+      VAD_NOISE_MULTIPLIER_IDLE: ${VAD_NOISE_MULTIPLIER_IDLE:-2.7}
+      MAX_HISTORY_MESSAGES: ${MAX_HISTORY_MESSAGES:-18}
+      MAX_CLAUSE_CHARS: ${MAX_CLAUSE_CHARS:-54}
+      MIN_CLAUSE_CHARS: ${MIN_CLAUSE_CHARS:-8}
+      MOCK_TRANSCRIPT: ${MOCK_TRANSCRIPT:-안녕. 지금 음성 대화 기능을 시험하고 있어.}
+    volumes:
+      - ./data/benchmark:/data/benchmark
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/config"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    networks: [voice-net]
+
+  qwen-asr:
+    profiles: ["local-asr"]
+    build:
+      context: .
+      dockerfile: services/qwen_asr/Dockerfile
+    restart: unless-stopped
+    ipc: host
+    environment:
+      HF_HOME: /cache/huggingface
+      ASR_MODEL_ID: ${ASR_MODEL_ID:-Qwen/Qwen3-ASR-0.6B}
+      ASR_GPU_MEMORY_UTILIZATION: ${ASR_GPU_MEMORY_UTILIZATION:-0.35}
+      ASR_CHUNK_SIZE_SEC: ${ASR_CHUNK_SIZE_SEC:-0.40}
+      ASR_UNFIXED_CHUNK_NUM: ${ASR_UNFIXED_CHUNK_NUM:-2}
+      ASR_UNFIXED_TOKEN_NUM: ${ASR_UNFIXED_TOKEN_NUM:-5}
+      ASR_MAX_NEW_TOKENS: ${ASR_MAX_NEW_TOKENS:-64}
+      ASR_LANGUAGE: ${STT_LANGUAGE:-Korean}
+    volumes:
+      - hf-cache:/cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [voice-net]
+
+  stt-benchmark:
+    profiles: ["benchmark"]
+    build:
+      context: .
+      dockerfile: benchmark/Dockerfile
+    environment:
+      QWEN_ASR_WS_URL: ws://qwen-asr:8101/ws
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      SONIOX_API_KEY: ${SONIOX_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ELEVENLABS_STT_MODEL: ${ELEVENLABS_STT_MODEL:-scribe_v2_realtime}
+      SONIOX_STT_MODEL: ${SONIOX_STT_MODEL:-stt-rt-v5}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      OPENAI_STT_MODEL: ${OPENAI_STT_MODEL:-gpt-4o-transcribe}
+      FASTER_WHISPER_DEVICE: ${FASTER_WHISPER_DEVICE:-cpu}
+      FASTER_WHISPER_COMPUTE_TYPE: ${FASTER_WHISPER_COMPUTE_TYPE:-int8}
+    volumes:
+      - ./data/benchmark:/data/benchmark
+    networks: [voice-net]
+
+  qwen-tts:
+    profiles: ["local-tts"]
+    build:
+      context: .
+      dockerfile: services/qwen_tts/Dockerfile
+    restart: unless-stopped
+    ipc: host
+    environment:
+      HF_HOME: /cache/huggingface
+      TTS_MODEL_ID: ${TTS_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}
+      TTS_BACKEND: ${TTS_BACKEND:-auto}
+      TTS_CHUNK_SIZE: ${TTS_CHUNK_SIZE:-4}
+      TTS_PROMPT_CACHE_SIZE: ${TTS_PROMPT_CACHE_SIZE:-8}
+      VOICE_PROFILE_DIR: /data/voices
+      VOICE_MIN_SECONDS: ${VOICE_MIN_SECONDS:-3}
+      VOICE_MAX_SECONDS: ${VOICE_MAX_SECONDS:-45}
+    volumes:
+      - hf-cache:/cache/huggingface
+      - ./data/voices:/data/voices
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [voice-net]
+
+networks:
+  voice-net:
+    driver: bridge
+
+volumes:
+  hf-cache:
