@@ -52,8 +52,8 @@
 ```powershell
 Copy-Item .env.example .env
 
-.\persona-duplex.ps1 doctor
-.\persona-duplex.ps1 start balanced
+.\scripts\persona-duplex.ps1 doctor
+.\scripts\persona-duplex.ps1 start balanced
 ```
 
 브라우저에서 다음 주소를 엽니다.
@@ -62,34 +62,34 @@ Copy-Item .env.example .env
 http://localhost:8080
 ```
 
-실행기는 Ollama `qwen3:1.7b`와 Qwen ASR/TTS 모델을 자동으로 다운로드·warmup하고, 세 모델이 준비된 뒤에만 UI 주소를 준비 완료로 표시합니다.
+실행기는 이미 있는 Ollama `qwen3:1.7b`와 Qwen ASR/TTS 모델을 먼저 확인하고, 없는 모델만 준비합니다. 모델이 준비된 뒤에만 UI 주소를 표시합니다.
 
 ```powershell
 # 로컬 균형 모드
-.\persona-duplex.ps1 start balanced
+.\scripts\persona-duplex.ps1 start balanced
 
 # 로컬 정확도 모드
-.\persona-duplex.ps1 start accuracy
+.\scripts\persona-duplex.ps1 start accuracy
 ```
 
-더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. Docker Desktop이 꺼져 있으면 실행기가 먼저 시작하고, 기본 모드 `balanced`로 Ollama·ASR·TTS 모델이 준비될 때까지 자동으로 대기합니다. Compose 서비스는 재부팅 후 자동 시작하지 않으며, 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다. `mock`은 실전 실행 경로가 아닌 자동화 테스트용입니다.
+Docker Desktop은 `docker-on.bat`으로 켜고 `docker-off.bat`으로 끕니다. 그다음 `start.bat`을 더블클릭하면 서버가 시작되고, `Ctrl+C`를 누르면 Persona Duplex 서비스만 멈춥니다. Docker가 꺼진 상태에서 `start.bat`을 실행하면 먼저 `docker-on.bat`을 실행하라는 오류가 나옵니다. 실행할 때마다 이미지를 다시 만들지 않으며, 소스를 바꾼 뒤 다시 만들 때만 `./scripts/persona-duplex.ps1 build`를 실행합니다.
 
-기본 실행은 Tailscale Funnel로 외부 주소도 출력합니다. 원본 서버는 로컬 `127.0.0.1:8080`에 남고, 외부에는 게이트웨이 8080만 공개됩니다. `Ctrl+C` 또는 `persona-duplex.bat stop`을 실행하면 서비스와 Funnel이 함께 종료됩니다. 로컬에서만 쓰려면 `.env`에 `PUBLIC_TUNNEL=off`를 설정하세요. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 외부 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
+기본 실행은 Tailscale Funnel로 외부 주소도 출력합니다. 원본 서버는 로컬 `127.0.0.1:8080`에 남고, 외부에는 게이트웨이 8080만 공개됩니다. 외부 접속을 사용할 때는 `.env`의 `PUBLIC_TUNNEL`을 끄지 마세요. `Ctrl+C`는 서비스와 Funnel을 종료하지만 Docker Desktop은 계속 켜져 있습니다. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 외부 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
 
 클라우드 STT를 쓸 때는 `.env`에 해당 키를 입력한 뒤 실행합니다.
 
 ```powershell
-.\persona-duplex.ps1 start cloud-elevenlabs
-.\persona-duplex.ps1 start cloud-soniox
-.\persona-duplex.ps1 start cloud-deepgram
+.\scripts\persona-duplex.ps1 start cloud-elevenlabs
+.\scripts\persona-duplex.ps1 start cloud-soniox
+.\scripts\persona-duplex.ps1 start cloud-deepgram
 ```
 
 상태와 로그:
 
 ```powershell
-.\persona-duplex.ps1 status
-.\persona-duplex.ps1 logs
-.\persona-duplex.ps1 stop
+.\scripts\persona-duplex.ps1 status
+.\scripts\persona-duplex.ps1 logs
+.\scripts\persona-duplex.ps1 stop
 ```
 
 ## Linux/WSL2 시작
@@ -97,8 +97,8 @@ http://localhost:8080
 ```bash
 cp .env.example .env
 
-./persona-duplex.sh doctor
-./persona-duplex.sh start balanced
+./scripts/persona-duplex.sh doctor
+./scripts/persona-duplex.sh start balanced
 ```
 
 ## 사용자 목소리 등록
@@ -132,19 +132,19 @@ cp .env.example .env
 4. 벤치마크를 실행합니다.
 
 ```powershell
-.\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
-.\benchmark-stt.ps1 select balanced
-.\benchmark-stt.ps1 apply
-.\persona-duplex.ps1 start selected
+.\scripts\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
+.\scripts\benchmark-stt.ps1 select balanced
+.\scripts\benchmark-stt.ps1 apply
+.\scripts\persona-duplex.ps1 start selected
 ```
 
 Linux/WSL2:
 
 ```bash
-./benchmark-stt.sh run qwen,elevenlabs,soniox,deepgram
-./benchmark-stt.sh select balanced
-./benchmark-stt.sh apply
-./persona-duplex.sh start selected
+./scripts/benchmark-stt.sh run qwen,elevenlabs,soniox,deepgram
+./scripts/benchmark-stt.sh select balanced
+./scripts/benchmark-stt.sh apply
+./scripts/persona-duplex.sh start selected
 ```
 
 선발 기준은 한국어 CER, 첫 부분 자막 지연, 발화 종료 후 최종 확정 지연입니다. 실패한 서비스와 키가 없는 서비스는 자동으로 제외됩니다.

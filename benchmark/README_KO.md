@@ -35,7 +35,7 @@ python benchmark/select_best.py data/benchmark/results.csv --policy balanced
 python benchmark/apply_selection.py
 ```
 
-호스트 Python 의존성 설치가 번거로우면 루트의 `benchmark-stt.sh` 또는 `benchmark-stt.ps1`을 사용합니다. 측정 단계가 Docker 컨테이너에서 실행됩니다.
+호스트 Python 의존성 설치가 번거로우면 `scripts/benchmark-stt.sh` 또는 `scripts\benchmark-stt.ps1`을 사용합니다. 측정 단계가 Docker 컨테이너에서 실행됩니다.
 
 ## 공급자 이름
 

@@ -22,7 +22,7 @@ data/benchmark/manifest.csv
 Qwen 후보를 포함하려면 로컬 ASR 서비스를 먼저 실행합니다. 자동 선발의 Qwen 운영값은 정확도 우선 1.7B이므로 공정하게 비교하려면 `accuracy` 모드로 측정합니다.
 
 ```bash
-./persona-duplex.sh start accuracy
+./scripts/persona-duplex.sh start accuracy
 ```
 
 클라우드 후보를 포함하려면 `.env`에 필요한 키를 넣습니다.
@@ -39,13 +39,13 @@ OPENAI_API_KEY=
 Linux/WSL2:
 
 ```bash
-./benchmark-stt.sh run qwen,elevenlabs,soniox,deepgram
+./scripts/benchmark-stt.sh run qwen,elevenlabs,soniox,deepgram
 ```
 
 Windows PowerShell:
 
 ```powershell
-.\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
+.\scripts\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
 ```
 
 결과는 `data/benchmark/results.csv`에 저장됩니다.
@@ -68,12 +68,12 @@ Windows PowerShell:
 ## 4. 선발
 
 ```bash
-./benchmark-stt.sh select accuracy
-./benchmark-stt.sh select balanced
-./benchmark-stt.sh select latency
+./scripts/benchmark-stt.sh select accuracy
+./scripts/benchmark-stt.sh select balanced
+./scripts/benchmark-stt.sh select latency
 ```
 
-Windows에서는 같은 인자를 `benchmark-stt.ps1`에 사용합니다.
+Windows에서는 같은 인자를 `scripts\benchmark-stt.ps1`에 사용합니다.
 
 출력 파일:
 
@@ -84,8 +84,8 @@ benchmark/selected_stt.env
 ## 5. 적용
 
 ```bash
-./benchmark-stt.sh apply
-./persona-duplex.sh start selected
+./scripts/benchmark-stt.sh apply
+./scripts/persona-duplex.sh start selected
 ```
 
 적용 스크립트는 `.env`의 기존 LLM·TTS·페르소나 설정을 보존하고 STT 관련 값만 갱신합니다.

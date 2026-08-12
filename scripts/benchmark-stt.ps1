@@ -4,7 +4,7 @@ param(
   [string]$Value = "qwen,elevenlabs,soniox,deepgram"
 )
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
 $Results = "data/benchmark/results.csv"
 
@@ -33,10 +33,10 @@ switch ($Action) {
   default {
     Write-Host @"
 Usage:
-  .\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
-  .\benchmark-stt.ps1 select accuracy
-  .\benchmark-stt.ps1 apply
-  .\benchmark-stt.ps1 all qwen,elevenlabs,soniox,deepgram
+  .\scripts\benchmark-stt.ps1 run qwen,elevenlabs,soniox,deepgram
+  .\scripts\benchmark-stt.ps1 select accuracy
+  .\scripts\benchmark-stt.ps1 apply
+  .\scripts\benchmark-stt.ps1 all qwen,elevenlabs,soniox,deepgram
 "@
   }
 }
