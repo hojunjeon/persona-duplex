@@ -90,6 +90,7 @@ def test_voice_update_and_delete_contract_in_mock_mode() -> None:
         deleted = client.delete(f"/api/voices/{profile_id}")
         assert deleted.status_code == 200
         assert deleted.json() == {"ok": True, "profile_id": profile_id}
+        assert profile_id not in main._mock_voice_profiles
         assert all(item["profile_id"] != profile_id for item in client.get("/api/voices").json())
         assert client.delete(f"/api/voices/{profile_id}").status_code == 404
 
@@ -183,6 +184,27 @@ def test_simplified_persona_static_select_contract() -> None:
     assert "selectPersona(state.createdPersonaId)" in script
     assert "대화를 시작하려면 대화 시작을 누르세요" in script
     assert "startConversation()" not in script[script.index("async function submitPersona"): script.index("async function refreshVoices")]
+
+
+def test_voice_sources_are_separate_and_submit_actual_selected_file() -> None:
+    html = (ROOT / "gateway" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    script = (ROOT / "gateway" / "app" / "static" / "app.js").read_text(encoding="utf-8")
+
+    for element_id in (
+        "recordReference",
+        "stopReference",
+        "recordingPreview",
+        "enrollRecordedVoice",
+        "referenceUpload",
+        "uploadPreview",
+        "enrollUploadedVoice",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'enrollVoice("recording")' in script
+    assert 'enrollVoice("upload")' in script
+    assert 'form.append("audio", file' in script
+    assert "referenceBlob" not in script
+    assert 'id="enrollVoice"' not in html
 
 
 def test_source_backed_launchers_always_rebuild_images() -> None:

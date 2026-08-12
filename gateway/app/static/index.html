@@ -27,29 +27,44 @@
           <input id="voiceName" value="내 목소리" maxlength="80" />
         </div>
         <div class="field">
-          <label for="referenceText">녹음하면서 정확히 읽을 문장</label>
+          <label for="referenceText">녹음·업로드할 때 정확히 읽을 문장</label>
           <textarea id="referenceText">안녕하세요. 지금 제 목소리를 복제하기 위한 기준 음성을 녹음하고 있습니다. 저는 평소 말하는 속도와 높이로 또렷하고 자연스럽게 이 문장을 읽고 있습니다.</textarea>
-          <div class="small">녹음하거나 파일을 선택할 때 이 대본을 실제로 정확히 읽어 주세요. 8~20초 분량을 권장합니다. <span id="referenceUploadLimit">파일 크기 제한을 불러오는 중</span>.</div>
+          <div class="small">두 등록 방식 모두 이 대본과 실제 발화를 맞춰 주세요. 8~20초 분량을 권장합니다. <span id="referenceUploadLimit">파일 크기 제한을 불러오는 중</span>.</div>
         </div>
-        <div class="field">
-          <label for="referenceUpload">기존 기준 음성 파일 선택</label>
-          <input id="referenceUpload" type="file" accept=".webm,.wav,.mp4,.m4a,.ogg,.opus,audio/*" />
-          <div id="referenceSource" class="small" aria-live="polite"></div>
+        <div class="voice-source-grid">
+          <fieldset class="voice-source">
+            <legend>마이크로 직접 녹음</legend>
+            <div class="small">브라우저 마이크로 기준 음성을 녹음합니다. 녹음이 끝난 뒤 이 방식의 등록 버튼을 누르세요.</div>
+            <div class="actions voice-source-actions">
+              <button id="recordReference" type="button" class="primary">기준 음성 녹음</button>
+              <button id="stopReference" type="button" disabled>녹음 종료</button>
+              <span id="recordTimer" class="timer">00:00.0</span>
+            </div>
+            <audio id="recordingPreview" controls preload="metadata" aria-label="녹음한 기준 음성 미리듣기"></audio>
+            <div id="recordingSource" class="small" aria-live="polite"></div>
+            <button id="enrollRecordedVoice" type="button" class="primary voice-submit" disabled>녹음으로 프로필 생성</button>
+            <div id="recordingMessage" class="small voice-source-message" aria-live="polite"></div>
+          </fieldset>
+          <fieldset class="voice-source">
+            <legend>기존 파일 첨부</legend>
+            <div class="small">이미 준비한 기준 음성을 선택합니다. 선택한 실제 파일을 그대로 서버에 전송합니다.</div>
+            <div class="field voice-file-field">
+              <label for="referenceUpload">기준 음성 파일</label>
+              <input id="referenceUpload" type="file" accept=".webm,.wav,.mp4,.m4a,.ogg,.opus" />
+            </div>
+            <audio id="uploadPreview" controls preload="metadata" aria-label="첨부한 기준 음성 미리듣기"></audio>
+            <div id="uploadSource" class="small" aria-live="polite"></div>
+            <button id="enrollUploadedVoice" type="button" class="primary voice-submit" disabled>첨부 파일로 프로필 생성</button>
+            <div id="uploadMessage" class="small voice-source-message" aria-live="polite"></div>
+          </fieldset>
         </div>
-        <div class="actions">
-          <button id="recordReference" class="primary">기준 음성 녹음</button>
-          <button id="stopReference" disabled>녹음 종료</button>
-          <span id="recordTimer" class="timer">00:00.0</span>
-        </div>
-        <audio id="referencePreview" controls style="width:100%;margin-top:10px"></audio>
         <div class="field" style="margin-top:12px">
           <label class="checkbox"><input id="consent" type="checkbox" /> 이 목소리는 본인 것이거나, 복제·합성에 대한 명시적 허가를 받았습니다.</label>
         </div>
         <div class="actions">
-          <button id="enrollVoice" class="primary">업로드한 녹음으로 프로필 생성</button>
-          <button id="refreshVoices">목소리 목록 새로고침</button>
+          <button id="refreshVoices" type="button">목소리 목록 새로고침</button>
         </div>
-        <div class="small">생성 버튼을 누르면 업로드한 녹음을 서버에 등록하고, 모델 warm-up 뒤 목소리 목록을 새로고침합니다.</div>
+        <div class="small">각 생성 버튼은 선택한 방식만 등록하고, 성공하면 모델 warm-up 뒤 목소리 목록을 새로고침합니다.</div>
         <div id="enrollMessage" class="small" style="margin-top:9px"></div>
         <div id="voiceList" class="voice-list"></div>
         <p class="notice"><strong>권장:</strong> 8~20초, 한 사람, 같은 마이크 거리, 배경 음악 없음. 대본과 실제 발화가 다르면 음색보다 발음 사고가 더 충실히 복제될 수 있습니다.</p>

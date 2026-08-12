@@ -36,6 +36,15 @@ h1 { margin: 0; font-size: 25px; }
 .field { margin-bottom: 13px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .timer { color: var(--accent); font-variant-numeric: tabular-nums; }
+.voice-source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.voice-source { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0f151f; }
+.voice-source legend { padding: 0 6px; color: var(--accent); font-size: 13px; font-weight: 700; }
+.voice-source audio { display: block; width: 100%; margin: 10px 0 7px; }
+.voice-source-actions { margin-top: 10px; }
+.voice-source-actions .timer { margin-left: auto; }
+.voice-file-field { margin: 10px 0 0; }
+.voice-submit { width: 100%; margin-top: 10px; }
+.voice-source-message { min-height: 18px; margin-top: 7px; }
 .notice { font-size: 12px; line-height: 1.55; color: var(--muted); border-left: 3px solid var(--line); padding-left: 10px; }
 .notice strong { color: var(--text); }
 .voice-list { display: grid; gap: 8px; margin: 12px 0; max-height: 160px; overflow: auto; }
@@ -74,6 +83,7 @@ h1 { margin: 0; font-size: 25px; }
   .conversation { min-height: 620px; }
   .controls { grid-template-columns: 1fr; }
   .persona-create-grid { grid-template-columns: 1fr; }
+  .voice-source-grid { grid-template-columns: 1fr; }
 }
 .runtime-info { margin-top: 7px; color: var(--muted); font-size: 11px; text-align: right; }
 .metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; margin-top: 10px; }

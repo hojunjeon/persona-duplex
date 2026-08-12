@@ -10,15 +10,20 @@ const state = {
   activePersonaId: "",
   voices: [],
   selectedVoice: "",
-  referenceBlob: null,
-  referenceFilename: "",
-  referenceObjectUrl: "",
-  referenceSource: "",
+  recordingFile: null,
+  recordingFilename: "",
+  recordingObjectUrl: "",
+  uploadFile: null,
+  uploadFilename: "",
+  uploadObjectUrl: "",
   referenceMaxBytes: DEFAULT_REFERENCE_MAX_BYTES,
   referenceStream: null,
   recorder: null,
   recordStartedAt: 0,
   recordTimer: null,
+  recordingSubmitting: false,
+  uploadSubmitting: false,
+  voiceMutations: new Set(),
   ws: null,
   micStream: null,
   micContext: null,
@@ -358,15 +363,25 @@ async function refreshVoices(selectId = null) {
     label.querySelector("strong").textContent = voice.display_name || id;
     label.querySelector(".small").textContent = `${Number(voice.seconds || 0).toFixed(1)}초 · ${id}`;
     const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.setAttribute("aria-label", `${voice.display_name || id} 프로필 선택`);
     useButton.textContent = "선택";
     useButton.onclick = () => selectVoice(id);
     const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.setAttribute("aria-label", `${voice.display_name || id} 프로필 편집`);
     editButton.textContent = "편집";
     editButton.onclick = () => editVoice(id).catch((error) => setMessage(error.message, true));
     const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.setAttribute("aria-label", `${voice.display_name || id} 프로필 삭제`);
     deleteButton.textContent = "삭제";
     deleteButton.className = "danger";
     deleteButton.onclick = () => deleteVoice(id).catch((error) => setMessage(error.message, true));
+    const mutationDisabled = state.voiceMutations.has(id);
+    useButton.disabled = mutationDisabled;
+    editButton.disabled = mutationDisabled;
+    deleteButton.disabled = mutationDisabled;
     const actions = document.createElement("div");
     actions.className = "voice-card-actions";
     actions.append(useButton, editButton, deleteButton);
@@ -394,35 +409,59 @@ function selectVoice(id) {
   }
 }
 
+function setVoiceCardMutationUi(id, disabled) {
+  for (const card of $("voiceList").children) {
+    if (card.dataset.profileId !== id) continue;
+    card.querySelectorAll("button").forEach((button) => { button.disabled = disabled; });
+  }
+}
+
 async function editVoice(id) {
   if (state.ws) throw new Error("대화 중에는 목소리 프로필을 수정할 수 없습니다.");
+  if (state.voiceMutations.has(id)) return;
   const profile = state.voices.find((voice) => voice.profile_id === id);
   if (!profile) throw new Error("목소리 프로필을 찾을 수 없습니다.");
   const displayName = window.prompt("프로필 이름", profile.display_name || "내 목소리");
   if (displayName === null) return;
   const transcript = window.prompt("참조 대본", profile.transcript || "");
   if (transcript === null) return;
-  const response = await api(`/api/voices/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ display_name: displayName, transcript }),
-  });
-  setMessage("프로필 수정 완료. 모델 warm-up 중…");
-  await api(`/api/voices/${encodeURIComponent(id)}/warmup`, { method: "POST" });
-  await refreshVoices(id);
-  setMessage(`프로필 수정 및 warm-up 완료: ${response.display_name || displayName}`);
+  state.voiceMutations.add(id);
+  setVoiceCardMutationUi(id, true);
+  try {
+    const response = await api(`/api/voices/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName, transcript }),
+    });
+    setMessage("프로필 수정 완료. 모델 warm-up 중…");
+    await api(`/api/voices/${encodeURIComponent(id)}/warmup`, { method: "POST" });
+    state.voiceMutations.delete(id);
+    await refreshVoices(id);
+    setMessage(`프로필 수정 및 warm-up 완료: ${response.display_name || displayName}`);
+  } finally {
+    state.voiceMutations.delete(id);
+    setVoiceCardMutationUi(id, false);
+  }
 }
 
 async function deleteVoice(id) {
   if (state.ws) throw new Error("대화 중에는 목소리 프로필을 삭제할 수 없습니다.");
+  if (state.voiceMutations.has(id)) return;
   const profile = state.voices.find((voice) => voice.profile_id === id);
   if (!profile) throw new Error("목소리 프로필을 찾을 수 없습니다.");
   if (!window.confirm(`\"${profile.display_name || id}\" 프로필을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
   const wasSelected = state.selectedVoice === id;
-  await api(`/api/voices/${encodeURIComponent(id)}`, { method: "DELETE" });
-  if (wasSelected) state.selectedVoice = "";
-  await refreshVoices();
-  setMessage(`프로필 삭제 완료: ${profile.display_name || id}`);
+  state.voiceMutations.add(id);
+  setVoiceCardMutationUi(id, true);
+  try {
+    await api(`/api/voices/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (wasSelected) state.selectedVoice = "";
+    await refreshVoices();
+    setMessage(`프로필 삭제 완료: ${profile.display_name || id}`);
+  } finally {
+    state.voiceMutations.delete(id);
+    setVoiceCardMutationUi(id, false);
+  }
 }
 
 function referenceExtension(filename) {
@@ -445,29 +484,64 @@ function referenceExtensionForMime(mimeType) {
   return extensions[mime] || ".webm";
 }
 
+const VOICE_SOURCE_CONFIG = {
+  recording: {
+    fileKey: "recordingFile",
+    filenameKey: "recordingFilename",
+    objectUrlKey: "recordingObjectUrl",
+    previewId: "recordingPreview",
+    statusId: "recordingSource",
+    messageId: "recordingMessage",
+    submitId: "enrollRecordedVoice",
+    label: "녹음",
+  },
+  upload: {
+    fileKey: "uploadFile",
+    filenameKey: "uploadFilename",
+    objectUrlKey: "uploadObjectUrl",
+    previewId: "uploadPreview",
+    statusId: "uploadSource",
+    messageId: "uploadMessage",
+    submitId: "enrollUploadedVoice",
+    label: "첨부 파일",
+  },
+};
+
 function stopReferenceStream() {
   state.referenceStream?.getTracks().forEach((track) => track.stop());
   state.referenceStream = null;
 }
 
-function clearReferenceSource() {
-  if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
-  state.referenceBlob = null;
-  state.referenceFilename = "";
-  state.referenceObjectUrl = "";
-  state.referenceSource = "";
-  const preview = $("referencePreview");
+function setSourceMessage(source, text, isError = false) {
+  const config = VOICE_SOURCE_CONFIG[source];
+  const element = $(config.messageId);
+  element.textContent = text;
+  element.className = isError ? "small error voice-source-message" : "small voice-source-message";
+}
+
+function clearAudioSource(source) {
+  const config = VOICE_SOURCE_CONFIG[source];
+  const objectUrl = state[config.objectUrlKey];
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  state[config.fileKey] = null;
+  state[config.filenameKey] = "";
+  state[config.objectUrlKey] = "";
+  const preview = $(config.previewId);
   preview.removeAttribute("src");
   preview.load();
-  $("referenceSource").textContent = "";
+  $(config.statusId).textContent = "";
+  $(config.submitId).disabled = true;
+  setSourceMessage(source, "");
 }
 
 function setReferenceAudio(file, source = "upload") {
   if (!file || typeof file.size !== "number") throw new Error("기준 음성 파일을 읽을 수 없습니다.");
+  const kind = source === "recording" ? "recording" : "upload";
+  const config = VOICE_SOURCE_CONFIG[kind];
   const filename = String(file.name || "").split(/[\\/]/).pop() || "reference.webm";
   const extension = referenceExtension(filename);
   if (!REFERENCE_EXTENSIONS.has(extension)) {
-    throw new Error("지원하지 않는 기준 음성 형식입니다. webm, wav, mp4, m4a, ogg, opus만 사용할 수 있습니다.");
+    throw new Error("지원하지 않는 기준 음성 형식입니다. webm, wav, mp4, m4a, ogg, opus만 사용할 수 있습니다. mp3, flac, aac은 현재 서버에서 지원하지 않습니다.");
   }
   if (file.size <= 0) throw new Error("빈 기준 음성 파일입니다.");
   if (file.size > state.referenceMaxBytes) {
@@ -475,19 +549,20 @@ function setReferenceAudio(file, source = "upload") {
   }
 
   const objectUrl = URL.createObjectURL(file);
-  if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
-  state.referenceBlob = file;
-  state.referenceFilename = filename;
-  state.referenceObjectUrl = objectUrl;
-  state.referenceSource = source;
-  $("referencePreview").src = objectUrl;
-  $("referenceSource").textContent = `${source === "recording" ? "녹음" : "파일 선택"}: ${filename} (${(file.size / 1024).toFixed(1)} KiB)`;
+  if (state[config.objectUrlKey]) URL.revokeObjectURL(state[config.objectUrlKey]);
+  state[config.fileKey] = file;
+  state[config.filenameKey] = filename;
+  state[config.objectUrlKey] = objectUrl;
+  $(config.previewId).src = objectUrl;
+  $(config.statusId).textContent = `${config.label}: ${filename} (${(file.size / 1024).toFixed(1)} KiB)`;
+  $(config.submitId).disabled = false;
 }
 
 function setReferenceRecordingUi(recording) {
-  $("recordReference").disabled = recording;
-  $("stopReference").disabled = !recording;
-  $("referenceUpload").disabled = recording;
+  const active = recording || state.recorder?.state === "recording";
+  $("recordReference").disabled = active || state.recordingSubmitting;
+  $("stopReference").disabled = !active;
+  $("enrollRecordedVoice").disabled = active || state.recordingSubmitting || !state.recordingFile;
 }
 
 function handleReferenceUpload(event) {
@@ -495,21 +570,24 @@ function handleReferenceUpload(event) {
   if (!file) return;
   try {
     setReferenceAudio(file, "upload");
-    setMessage("기준 음성 파일을 선택했습니다. 대본을 실제 발화와 맞춘 뒤 등록하세요.");
+    setSourceMessage("upload", "첨부 파일이 준비됐습니다. 대본을 실제 발화와 맞춘 뒤 이 방식의 등록 버튼을 누르세요.");
+    setMessage("기준 음성 첨부 파일을 선택했습니다. 녹음 흐름과 별도로 첨부 파일 등록 버튼을 사용하세요.");
   } catch (error) {
     event.target.value = "";
+    clearAudioSource("upload");
+    setSourceMessage("upload", error.message, true);
     setMessage(error.message, true);
   }
 }
 
 async function startReferenceRecording() {
+  if (state.recordingSubmitting) throw new Error("녹음 등록이 끝날 때까지 새 녹음을 시작할 수 없습니다.");
   if (state.recorder?.state === "recording") return;
   stopReferenceStream();
   state.referenceStream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
   });
-  clearReferenceSource();
-  $("referenceUpload").value = "";
+  clearAudioSource("recording");
   const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
   const mimeType = mimeTypes.find((x) => MediaRecorder.isTypeSupported(x)) || "";
   const chunks = [];
@@ -532,7 +610,10 @@ async function startReferenceRecording() {
       : blob;
     try {
       setReferenceAudio(file, "recording");
+      setSourceMessage("recording", `녹음이 준비됐습니다. ${state.recordingFilename}을 등록하려면 녹음으로 프로필 생성을 누르세요.`);
     } catch (error) {
+      clearAudioSource("recording");
+      setSourceMessage("recording", error.message, true);
       setMessage(error.message, true);
     }
     stopReferenceStream();
@@ -540,7 +621,7 @@ async function startReferenceRecording() {
     clearInterval(state.recordTimer);
     state.recordTimer = null;
     setReferenceRecordingUi(false);
-    if (state.referenceBlob) setMessage(`녹음 완료: ${state.referenceFilename} (${(state.referenceBlob.size / 1024).toFixed(1)} KiB)`);
+    if (state.recordingFile) setMessage(`녹음 완료: ${state.recordingFilename} (${(state.recordingFile.size / 1024).toFixed(1)} KiB)`);
   };
   state.recordStartedAt = performance.now();
   state.recordTimer = setInterval(() => {
@@ -557,26 +638,53 @@ function stopReferenceRecording() {
   if (state.recorder?.state === "recording") state.recorder.stop();
 }
 
-async function enrollVoice() {
-  if (!state.referenceBlob) throw new Error("먼저 기준 음성을 녹음하거나 파일 선택으로 추가하세요.");
+function setVoiceSubmitUi(source, submitting) {
+  const config = VOICE_SOURCE_CONFIG[source];
+  $(config.submitId).disabled = submitting || !state[config.fileKey]
+    || (source === "recording" && state.recorder?.state === "recording");
+  if (source === "upload") $("referenceUpload").disabled = submitting;
+  $(config.submitId).textContent = submitting
+    ? `${config.label} 등록 중…`
+    : `${config.label}으로 프로필 생성`;
+}
+
+async function enrollVoice(source) {
+  const config = VOICE_SOURCE_CONFIG[source];
+  if (!config) throw new Error("알 수 없는 목소리 등록 방식입니다.");
+  if (state[`${source}Submitting`]) return;
+  const file = state[config.fileKey];
+  if (!file) throw new Error(`${config.label} 기준 음성을 먼저 준비하세요.`);
   if (!$("consent").checked) throw new Error("본인 목소리 또는 허가받은 목소리라는 동의가 필요합니다.");
   const transcript = $("referenceText").value.trim();
   if (transcript.length < 5 || transcript.length > 1000) throw new Error("참조 대본은 5~1000자여야 합니다.");
   const displayName = $("voiceName").value.trim() || "내 목소리";
   if (displayName.length > 80) throw new Error("프로필 이름은 80자 이하여야 합니다.");
   const form = new FormData();
-  form.append("audio", state.referenceBlob, state.referenceFilename || "reference.webm");
+  // Keep the browser's actual File (including its selected filename and MIME).
+  form.append("audio", file, state[config.filenameKey] || file.name || "reference.webm");
   form.append("transcript", transcript);
   form.append("display_name", displayName);
   form.append("consent", "true");
-  setMessage("업로드한 녹음으로 프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.");
-  const profile = await api("/api/voices/enroll", { method: "POST", body: form });
-  const qualityWarnings = profile.audio_quality?.warnings || [];
-  const qualityText = qualityWarnings.length ? ` 녹음 경고: ${qualityWarnings.join(" ")}` : "";
-  setMessage(`등록 완료: ${profile.display_name} (${Number(profile.seconds || 0).toFixed(1)}초). 프롬프트를 준비합니다.${qualityText}`);
-  await api(`/api/voices/${encodeURIComponent(profile.profile_id)}/warmup`, { method: "POST" });
-  await refreshVoices(profile.profile_id);
-  setMessage(`목소리 프롬프트 준비 완료. 이제 대화를 시작할 수 있습니다.${qualityText}`);
+  state[`${source}Submitting`] = true;
+  setVoiceSubmitUi(source, true);
+  if (source === "recording") setReferenceRecordingUi(false);
+  try {
+    setSourceMessage(source, `${config.label}으로 프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.`);
+    setMessage(`${config.label}으로 프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.`);
+    const profile = await api("/api/voices/enroll", { method: "POST", body: form });
+    const qualityWarnings = profile.audio_quality?.warnings || [];
+    const qualityText = qualityWarnings.length ? ` 녹음 경고: ${qualityWarnings.join(" ")}` : "";
+    setSourceMessage(source, `등록 완료: ${profile.display_name} (${Number(profile.seconds || 0).toFixed(1)}초). 모델 warm-up 중…${qualityText}`);
+    setMessage(`등록 완료: ${profile.display_name} (${Number(profile.seconds || 0).toFixed(1)}초). 모델 warm-up 중…${qualityText}`);
+    await api(`/api/voices/${encodeURIComponent(profile.profile_id)}/warmup`, { method: "POST" });
+    await refreshVoices(profile.profile_id);
+    setSourceMessage(source, `등록·warm-up 완료: ${profile.display_name}. 이제 대화를 시작할 수 있습니다.${qualityText}`);
+    setMessage(`목소리 프롬프트 준비 완료. 이제 대화를 시작할 수 있습니다.${qualityText}`);
+  } finally {
+    state[`${source}Submitting`] = false;
+    setVoiceSubmitUi(source, false);
+    if (source === "recording") setReferenceRecordingUi(false);
+  }
 }
 
 async function startMicCapture() {
@@ -830,7 +938,14 @@ function bindEvents() {
   $("recordReference").onclick = () => startReferenceRecording().catch((e) => setMessage(e.message, true));
   $("stopReference").onclick = stopReferenceRecording;
   $("referenceUpload").onchange = handleReferenceUpload;
-  $("enrollVoice").onclick = () => enrollVoice().catch((e) => setMessage(e.message, true));
+  $("enrollRecordedVoice").onclick = () => enrollVoice("recording").catch((e) => {
+    setSourceMessage("recording", e.message, true);
+    setMessage(e.message, true);
+  });
+  $("enrollUploadedVoice").onclick = () => enrollVoice("upload").catch((e) => {
+    setSourceMessage("upload", e.message, true);
+    setMessage(e.message, true);
+  });
   $("refreshVoices").onclick = () => refreshVoices().catch((e) => setMessage(e.message, true));
   $("voiceSelect").onchange = () => selectVoice($("voiceSelect").value);
   $("personaSelect").onchange = () => {
@@ -855,7 +970,8 @@ function bindEvents() {
     try { state.recorder?.stop(); } catch (_) {}
     stopReferenceStream();
     if (state.recordTimer) clearInterval(state.recordTimer);
-    if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
+    if (state.recordingObjectUrl) URL.revokeObjectURL(state.recordingObjectUrl);
+    if (state.uploadObjectUrl) URL.revokeObjectURL(state.uploadObjectUrl);
   });
 }
 

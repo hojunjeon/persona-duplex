@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 import numpy as np
 
 
@@ -77,3 +78,50 @@ def test_official_backend_reuses_full_icl_prompt(monkeypatch) -> None:
         "language": "Korean",
         "voice_clone_prompt": ["prompt"],
     }
+
+
+def test_profile_upload_warmup_list_and_delete_contract(monkeypatch, tmp_path: Path) -> None:
+    """A multipart enrollment must survive warm-up, listing, and deletion."""
+
+    monkeypatch.setattr(server, "PROFILE_DIR", tmp_path)
+
+    def fake_normalize(_source: Path, target: Path) -> None:
+        target.write_bytes(b"normalized-reference")
+
+    monkeypatch.setattr(server, "_normalize_audio", fake_normalize)
+    monkeypatch.setattr(server, "_audio_seconds", lambda _path: 4.0)
+    monkeypatch.setattr(server, "_audio_stats", lambda _path: {"quality": "good", "warnings": []})
+    monkeypatch.setattr(server, "_load_model", lambda: (object(), "official-qwen-tts"))
+    monkeypatch.setattr(server, "_get_prompt", lambda _profile: ["prompt"])
+
+    form = {
+        "transcript": "정확히 읽은 기준 대본입니다.",
+        "display_name": "Qwen 회귀 테스트 목소리",
+        "consent": "true",
+    }
+    with TestClient(server.app) as client:
+        enrolled = client.post(
+            "/profiles",
+            data=form,
+            files={"audio": ("reference.wav", b"uploaded-reference", "audio/wav")},
+        )
+        assert enrolled.status_code == 200
+        profile = enrolled.json()
+        profile_id = profile["profile_id"]
+        assert profile["display_name"] == form["display_name"]
+        assert "audio_path" not in profile
+
+        warmed = client.post(f"/profiles/{profile_id}/warmup")
+        assert warmed.status_code == 200
+        assert warmed.json()["ok"] is True
+        assert warmed.json()["profile_id"] == profile_id
+
+        listed = client.get("/profiles")
+        assert listed.status_code == 200
+        assert any(item["profile_id"] == profile_id for item in listed.json())
+
+        deleted = client.delete(f"/profiles/{profile_id}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"ok": True, "profile_id": profile_id}
+        assert all(item["profile_id"] != profile_id for item in client.get("/profiles").json())
+        assert not (tmp_path / profile_id).exists()
