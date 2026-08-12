@@ -3,151 +3,232 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#08101d" />
   <title>Persona Duplex</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <div class="app">
-    <header>
-      <div>
-        <h1>Persona Duplex</h1>
-        <div class="subtitle">사용자 목소리 제로샷 복제 + 실시간 끼어들기 + 페르소나 음성 대화</div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Persona Duplex 탐색 및 설정">
+      <div class="brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
       </div>
-      <div>
-        <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">정지</span></div>
-        <div id="runtimeInfo" class="runtime-info">구성 불러오는 중</div>
-      </div>
-    </header>
 
-    <div class="grid">
-      <section class="panel">
-        <h2>1. 목소리 등록</h2>
-        <div class="field">
-          <label for="voiceName">프로필 이름</label>
-          <input id="voiceName" value="내 목소리" maxlength="80" />
+      <nav class="nav-list" aria-label="기능 탐색">
+        <a class="nav-item active" href="#live" aria-current="page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg>
+          <span>라이브 대화</span>
+        </a>
+        <a class="nav-item" href="#voice-management">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V7a2 2 0 0 1 2-2h8l4 4v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" /><path d="M14 5v4h4M8 15h8M8 11h3" /></svg>
+          <span>목소리 라이브러리</span>
+        </a>
+        <a class="nav-item" href="#persona-management">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 20c.5-3.4 2.7-5.2 6.5-5.2s6 1.8 6.5 5.2" /></svg>
+          <span>페르소나</span>
+        </a>
+        <a class="nav-item" href="#settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.06.06-2.12 2.12-.06-.06A1.8 1.8 0 0 0 15.66 18l-.16.06a1.8 1.8 0 0 0-1.1 1.65v.09h-3v-.09A1.8 1.8 0 0 0 10.3 18l-.16-.06a1.8 1.8 0 0 0-1.98.36l-.06.06-2.12-2.12.06-.06A1.8 1.8 0 0 0 6.4 14.2l-.06-.16A1.8 1.8 0 0 0 4.7 12.9h-.1v-3h.1a1.8 1.8 0 0 0 1.65-1.1l.06-.16a1.8 1.8 0 0 0-.36-1.98l-.06-.06L8.1 4.48l.06.06a1.8 1.8 0 0 0 1.98.36l.16-.06a1.8 1.8 0 0 0 1.1-1.65V3.1h3v.09a1.8 1.8 0 0 0 1.1 1.65l.16.06a1.8 1.8 0 0 0 1.98-.36l.06-.06 2.12 2.12-.06.06a1.8 1.8 0 0 0-.36 1.98l.06.16a1.8 1.8 0 0 0 1.65 1.1h.1v3h-.1a1.8 1.8 0 0 0-1.65 1.1Z" /></svg>
+          <span>설정</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-divider"></div>
+
+      <section class="profile-summary" aria-labelledby="voice-summary-title">
+        <span class="section-kicker" id="voice-summary-title">선택된 목소리</span>
+        <div class="voice-summary-row">
+          <div class="avatar-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div>
+            <div class="summary-name">내 목소리 <span class="verified">✓</span></div>
+            <div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <span class="summary-meta">등록된 음성 프로필</span>
+          </div>
         </div>
-        <div class="field">
-          <label for="referenceText">녹음·업로드할 때 정확히 읽을 문장</label>
-          <textarea id="referenceText">안녕하세요. 지금 제 목소리를 복제하기 위한 기준 음성을 녹음하고 있습니다. 저는 평소 말하는 속도와 높이로 또렷하고 자연스럽게 이 문장을 읽고 있습니다.</textarea>
-          <div class="small">두 등록 방식 모두 이 대본과 실제 발화를 맞춰 주세요. 8~20초 분량을 권장합니다. <span id="referenceUploadLimit">파일 크기 제한을 불러오는 중</span>.</div>
-        </div>
-        <div class="voice-source-grid">
-          <fieldset class="voice-source">
-            <legend>마이크로 직접 녹음</legend>
-            <div class="small">브라우저 마이크로 기준 음성을 녹음합니다. 녹음이 끝난 뒤 이 방식의 등록 버튼을 누르세요.</div>
-            <div class="actions voice-source-actions">
-              <button id="recordReference" type="button" class="primary">기준 음성 녹음</button>
-              <button id="stopReference" type="button" disabled>녹음 종료</button>
-              <span id="recordTimer" class="timer">00:00.0</span>
-            </div>
-            <audio id="recordingPreview" controls preload="metadata" aria-label="녹음한 기준 음성 미리듣기"></audio>
-            <div id="recordingSource" class="small" aria-live="polite"></div>
-            <button id="enrollRecordedVoice" type="button" class="primary voice-submit" disabled>녹음으로 프로필 생성</button>
-            <div id="recordingMessage" class="small voice-source-message" aria-live="polite"></div>
-          </fieldset>
-          <fieldset class="voice-source">
-            <legend>기존 파일 첨부</legend>
-            <div class="small">이미 준비한 기준 음성을 선택합니다. 선택한 실제 파일을 그대로 서버에 전송합니다.</div>
-            <div class="field voice-file-field">
-              <label for="referenceUpload">기준 음성 파일</label>
-              <input id="referenceUpload" type="file" accept=".webm,.wav,.mp4,.m4a,.ogg,.opus" />
-            </div>
-            <audio id="uploadPreview" controls preload="metadata" aria-label="첨부한 기준 음성 미리듣기"></audio>
-            <div id="uploadSource" class="small" aria-live="polite"></div>
-            <button id="enrollUploadedVoice" type="button" class="primary voice-submit" disabled>첨부 파일로 프로필 생성</button>
-            <div id="uploadMessage" class="small voice-source-message" aria-live="polite"></div>
-          </fieldset>
-        </div>
-        <div class="field" style="margin-top:12px">
-          <label class="checkbox"><input id="consent" type="checkbox" /> 이 목소리는 본인 것이거나, 복제·합성에 대한 명시적 허가를 받았습니다.</label>
-        </div>
-        <div class="actions">
-          <button id="refreshVoices" type="button">목소리 목록 새로고침</button>
-        </div>
-        <div class="small">각 생성 버튼은 선택한 방식만 등록하고, 성공하면 모델 warm-up 뒤 목소리 목록을 새로고침합니다.</div>
-        <div id="enrollMessage" class="small" style="margin-top:9px"></div>
-        <div id="voiceList" class="voice-list"></div>
-        <p class="notice"><strong>권장:</strong> 8~20초, 한 사람, 같은 마이크 거리, 배경 음악 없음. 대본과 실제 발화가 다르면 음색보다 발음 사고가 더 충실히 복제될 수 있습니다.</p>
+        <label class="sr-only" for="voiceSelect">대화에 사용할 목소리</label>
+        <select id="voiceSelect" class="compact-select" aria-label="대화에 사용할 목소리"></select>
+        <a class="summary-action" href="#voice-management">관리</a>
       </section>
 
-      <section class="panel conversation">
-        <div>
-          <h2>2. 실시간 대화</h2>
-          <div class="controls">
-            <div>
-              <label for="personaSelect">페르소나</label>
-              <select id="personaSelect"></select>
-            </div>
-            <div>
-              <label for="voiceSelect">사용할 목소리</label>
-              <select id="voiceSelect"></select>
-            </div>
-            <div class="actions">
-              <button id="startConversation" class="primary">대화 시작</button>
-              <button id="stopConversation" class="danger" disabled>중지</button>
-            </div>
+      <section class="profile-summary persona-summary" aria-labelledby="persona-summary-title">
+        <span class="section-kicker" id="persona-summary-title">현재 페르소나</span>
+        <div class="persona-summary-row">
+          <div class="persona-orb-small" aria-hidden="true"></div>
+          <div>
+            <div class="summary-name">노드</div>
+            <p>차분하고 정확한<br />설계 검토자</p>
           </div>
-          <details id="personaCreatePanel" class="persona-create">
-            <summary>새 페르소나 만들기</summary>
-            <div class="persona-create-grid persona-basic-grid">
-              <div class="field">
-                <label for="personaName">이름</label>
-                <input id="personaName" maxlength="200" autocomplete="off" required />
-              </div>
-              <div class="field">
-                <label for="personaIdentity">짧은 설명 / 정체성</label>
-                <input id="personaIdentity" maxlength="200" autocomplete="off" placeholder="예: 차분하고 정확한 검토 도우미" required />
-              </div>
-              <div class="field">
-                <label for="personaRelationship">관계</label>
-                <input id="personaRelationship" maxlength="200" autocomplete="off" placeholder="예: 사용자의 설계 검토자" required />
-              </div>
+          <span class="chevron" aria-hidden="true">⌄</span>
+        </div>
+        <label class="sr-only" for="personaSelect">대화할 페르소나</label>
+        <select id="personaSelect" class="compact-select" aria-label="대화할 페르소나"></select>
+      </section>
+
+      <div class="privacy-card">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2" /></svg>
+        <span>본인 또는 허가받은 음성만 사용</span>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>Persona Duplex</h1>
+          <div class="connection-status"><span id="statusDot" class="dot"></span><span id="statusText">준비됨</span></div>
+        </div>
+        <div class="topbar-actions">
+          <span id="runtimeInfo" class="runtime-info">구성 불러오는 중</span>
+          <span class="local-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-3Z" /><path d="m9 12 2 2 4-4" /></svg>로컬 우선</span>
+          <button type="button" class="help-button" aria-label="도움말">?</button>
+        </div>
+      </header>
+
+      <main class="main-layout" id="live">
+        <section class="conversation-canvas" aria-labelledby="conversation-title">
+          <div class="canvas-heading">
+            <div>
+              <span class="section-kicker">Live voice session</span>
+              <h2 id="conversation-title">페르소나와 대화</h2>
             </div>
-            <p class="small persona-basic-note">이 세 가지만 입력하면 바로 만들 수 있습니다. 나머지는 기본값으로 적용됩니다.</p>
+            <div class="session-timer"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>진행 준비</div>
+          </div>
+
+          <div class="live-stage">
+            <div class="orb-halo halo-one"></div>
+            <div class="orb-halo halo-two"></div>
+            <div class="audio-orb" aria-label="음성 대화 상태 시각화">
+              <span class="orb-ring ring-a"></span><span class="orb-ring ring-b"></span><span class="orb-ring ring-c"></span>
+              <div class="orb-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="listening-pill"><span class="listening-icon">⌁</span><strong>대화 준비</strong><span>마이크와 연결을 확인한 뒤 시작하세요</span></div>
+          </div>
+
+          <div id="chatLog" class="conversation-log" aria-live="polite">
+            <div class="bubble system">목소리와 페르소나를 선택한 뒤 대화를 시작하세요. AI가 말하는 중에도 언제든 말해 대화를 끼어들 수 있습니다.</div>
+          </div>
+          <div id="liveTranscript" class="live-transcript" aria-live="polite"><span class="transcript-pulse"></span>인식 대기</div>
+
+          <div class="conversation-controls">
+            <button id="startConversation" type="button" class="mic-control" aria-label="대화 시작">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" /></svg>
+              <span>대화 시작</span>
+            </button>
+            <button id="stopConversation" type="button" class="end-control" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8.5c3.7-2.1 8.3-2.1 12 0l.8.5c.7.4 1 1.3.6 2l-1.3 2.4c-.4.7-1.3 1-2 .6l-1.3-.8a5.6 5.6 0 0 0-5.6 0L7.9 14c-.7.4-1.6.1-2-.6L4.6 11c-.4-.7-.1-1.6.6-2l.8-.5Z" /></svg>
+              대화 종료
+            </button>
+          </div>
+          <p class="barge-hint"><span aria-hidden="true">⌁</span> 짧은 추임새는 음량만 낮추고, 계속 말하면 답변을 멈춥니다.</p>
+        </section>
+
+        <aside class="insights-panel" aria-label="실시간 세션 신호">
+          <section class="insight-section">
+            <div class="insights-header"><h2>세션 신호</h2><span class="live-label">LIVE</span></div>
+            <div class="metric-grid">
+              <article class="metric-card"><span>STT 확정</span><strong id="metricStt">-</strong><i class="metric-wave mint"></i></article>
+              <article class="metric-card"><span>LLM 첫 토큰</span><strong id="metricLlm">-</strong><i class="metric-wave blue"></i></article>
+              <article class="metric-card"><span>첫 음성</span><strong id="metricAudio">-</strong><i class="metric-wave purple"></i></article>
+            </div>
+          </section>
+
+          <section class="insight-card mic-level-card">
+            <div class="card-title">마이크 레벨 <span class="info-badge">i</span></div>
+            <div class="meter"><div id="micMeter"></div></div>
+            <div class="level-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </section>
+
+          <section class="insight-card barge-card">
+            <div class="barge-top"><h3>Barge-in</h3><span class="toggle-on" aria-label="활성화됨"><i></i></span></div>
+            <p><span class="shield-check">✓</span>응답 중단 감지 활성화</p>
+          </section>
+
+          <section class="insight-card flow-card">
+            <div class="flow-heading"><h3>대화 흐름</h3><span><i class="legend user"></i>나 <i class="legend node"></i>노드</span></div>
+            <svg class="flow-graph" viewBox="0 0 300 104" role="img" aria-label="사용자와 노드의 대화 흐름 그래프">
+              <path class="graph-line graph-node" d="M8 77 C28 75 34 58 50 61 S72 33 92 45 S112 62 128 45 S148 31 164 41 S185 70 204 45 S226 28 240 36 S260 58 291 15" />
+              <path class="graph-line graph-user" d="M8 88 C25 69 40 87 55 78 S74 88 91 72 S111 64 129 76 S152 86 169 70 S193 50 211 65 S236 86 253 71 S270 56 291 53" />
+              <path class="graph-base" d="M8 94H292" />
+            </svg>
+            <div class="graph-axis"><span>-60s</span><span>-40s</span><span>-20s</span><span>지금</span></div>
+          </section>
+
+          <section class="headphone-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v5H5a1 1 0 0 1-1-1v-4Zm13 0h3v4a1 1 0 0 1-1 1h-2v-5Z" /></svg>헤드폰 사용 권장</section>
+        </aside>
+      </main>
+
+      <section class="management-drawers" aria-label="목소리와 페르소나 관리">
+        <details class="management-panel" id="voice-management">
+          <summary><span><b>목소리 라이브러리</b><small>새 기준 음성을 등록하고 사용할 프로필을 관리합니다.</small></span><span class="summary-chevron">⌄</span></summary>
+          <div class="management-content">
+            <div class="voice-registration-layout">
+              <div class="registration-form">
+                <div class="field">
+                  <label for="voiceName">프로필 이름</label>
+                  <input id="voiceName" value="내 목소리" maxlength="80" />
+                </div>
+                <div class="field">
+                  <label for="referenceText">기준 음성 대본</label>
+                  <textarea id="referenceText">안녕하세요. 지금 제 목소리를 복제하기 위한 기준 음성을 녹음하고 있습니다. 저는 평소 말하는 속도와 높이로 또렷하고 자연스럽게 이 문장을 읽고 있습니다.</textarea>
+                  <div class="small">8~20초 분량을 권장합니다. <span id="referenceUploadLimit">파일 크기 제한을 불러오는 중</span>.</div>
+                </div>
+                <label class="checkbox"><input id="consent" type="checkbox" /> 이 목소리는 본인 것이거나, 복제·합성에 대한 명시적 허가를 받았습니다.</label>
+              </div>
+              <fieldset class="voice-source">
+                <legend>마이크로 직접 녹음</legend>
+                <p class="small">화면의 대본을 자연스럽게 읽어 기준 음성을 녹음하세요.</p>
+                <div class="actions voice-source-actions">
+                  <button id="recordReference" type="button" class="primary">기준 음성 녹음</button>
+                  <button id="stopReference" type="button" disabled>녹음 종료</button>
+                  <span id="recordTimer" class="timer">00:00.0</span>
+                </div>
+                <audio id="recordingPreview" controls preload="metadata" aria-label="녹음한 기준 음성 미리듣기"></audio>
+                <div id="recordingSource" class="small" aria-live="polite"></div>
+                <button id="enrollRecordedVoice" type="button" class="primary voice-submit" disabled>녹음으로 프로필 생성</button>
+                <div id="recordingMessage" class="small voice-source-message" aria-live="polite"></div>
+              </fieldset>
+              <fieldset class="voice-source">
+                <legend>기존 파일 첨부</legend>
+                <p class="small">준비한 기준 음성 파일을 선택해 새 프로필로 등록합니다.</p>
+                <div class="field voice-file-field">
+                  <label for="referenceUpload">기준 음성 파일</label>
+                  <input id="referenceUpload" type="file" accept=".webm,.wav,.mp4,.m4a,.ogg,.opus" />
+                </div>
+                <audio id="uploadPreview" controls preload="metadata" aria-label="첨부한 기준 음성 미리듣기"></audio>
+                <div id="uploadSource" class="small" aria-live="polite"></div>
+                <button id="enrollUploadedVoice" type="button" class="primary voice-submit" disabled>첨부 파일로 프로필 생성</button>
+                <div id="uploadMessage" class="small voice-source-message" aria-live="polite"></div>
+              </fieldset>
+            </div>
+            <div class="voice-library-footer"><button id="refreshVoices" type="button">목소리 목록 새로고침</button><span id="enrollMessage" class="small" aria-live="polite"></span></div>
+            <div id="voiceList" class="voice-list"></div>
+            <p class="notice"><strong>권장:</strong> 한 사람의 음성, 같은 마이크 거리, 배경 음악이 없는 환경에서 녹음하세요.</p>
+          </div>
+        </details>
+
+        <details id="personaCreatePanel" class="management-panel persona-create" aria-disabled="false">
+          <summary id="persona-management"><span><b>새 페르소나 만들기</b><small>대화의 정체성, 관계, 말투를 사용자에게 맞게 설정합니다.</small></span><span class="summary-chevron">⌄</span></summary>
+          <div class="management-content">
+            <div class="persona-create-grid persona-basic-grid">
+              <div class="field"><label for="personaName">이름</label><input id="personaName" maxlength="200" autocomplete="off" required /></div>
+              <div class="field"><label for="personaIdentity">짧은 설명 / 정체성</label><input id="personaIdentity" maxlength="200" autocomplete="off" placeholder="예: 차분하고 정확한 검토 도우미" required /></div>
+              <div class="field"><label for="personaRelationship">관계</label><input id="personaRelationship" maxlength="200" autocomplete="off" placeholder="예: 사용자의 설계 검토자" required /></div>
+            </div>
+            <p class="small persona-basic-note">세 가지만 입력하면 바로 만들 수 있습니다. 나머지는 기본값으로 적용됩니다.</p>
             <details id="personaAdvancedPanel" class="persona-advanced">
-              <summary>고급 설정 (선택, 기본값 사용)</summary>
+              <summary>고급 설정 (선택)</summary>
               <div class="persona-create-grid">
-                <div class="field">
-                  <label for="personaMaxSentences">기본 문장 수 (1~8)</label>
-                  <input id="personaMaxSentences" type="number" min="1" max="8" value="3" />
-                </div>
-                <div class="field">
-                  <label for="personaSpeakingStyle">말투 (한 줄에 하나)</label>
-                  <textarea id="personaSpeakingStyle" maxlength="3400"></textarea>
-                </div>
-                <div class="field">
-                  <label for="personaBehavior">행동 (한 줄에 하나)</label>
-                  <textarea id="personaBehavior" maxlength="3400"></textarea>
-                </div>
-                <div class="field">
-                  <label for="personaBoundaries">경계 (한 줄에 하나)</label>
-                  <textarea id="personaBoundaries" maxlength="3400"></textarea>
-                </div>
-                <div class="field">
-                  <label for="personaBackchannels">추임새 (한 줄에 하나)</label>
-                  <textarea id="personaBackchannels" maxlength="3400">응.
+                <div class="field"><label for="personaMaxSentences">기본 문장 수 (1~8)</label><input id="personaMaxSentences" type="number" min="1" max="8" value="3" /></div>
+                <div class="field"><label for="personaSpeakingStyle">말투 (한 줄에 하나)</label><textarea id="personaSpeakingStyle" maxlength="3400"></textarea></div>
+                <div class="field"><label for="personaBehavior">행동 (한 줄에 하나)</label><textarea id="personaBehavior" maxlength="3400"></textarea></div>
+                <div class="field"><label for="personaBoundaries">경계 (한 줄에 하나)</label><textarea id="personaBoundaries" maxlength="3400"></textarea></div>
+                <div class="field"><label for="personaBackchannels">추임새 (한 줄에 하나)</label><textarea id="personaBackchannels" maxlength="3400">응.
 음.
-아하.</textarea>
-                </div>
+아하.</textarea></div>
               </div>
             </details>
-            <div class="actions">
-              <button id="createPersona" class="primary">페르소나 생성</button>
-              <button id="selectCreatedPersona" type="button" hidden>새 페르소나 선택</button>
-              <span id="personaCreateMessage" class="small" aria-live="polite"></span>
-            </div>
-            <p class="small">생성은 저장과 목록 갱신만 합니다. 새 페르소나를 쓰려면 <strong>새 페르소나 선택</strong>을 한 번 누른 뒤 대화 시작을 누르세요. 대화는 자동으로 시작하지 않습니다.</p>
-          </details>
-          <div class="meter" style="margin-top:12px"><div id="micMeter"></div></div>
-          <div class="metrics">
-            <div><span>STT 확정</span><strong id="metricStt">-</strong></div>
-            <div><span>LLM 첫 토큰</span><strong id="metricLlm">-</strong></div>
-            <div><span>첫 음성</span><strong id="metricAudio">-</strong></div>
+            <div class="actions persona-actions"><button id="createPersona" class="primary" type="button">페르소나 생성</button><button id="selectCreatedPersona" type="button" hidden>새 페르소나 선택</button><span id="personaCreateMessage" class="small" aria-live="polite"></span></div>
           </div>
-        </div>
-        <div id="chatLog" class="log"><div class="bubble system">목소리를 등록하고 대화를 시작하세요. 마이크는 AI가 말할 때도 계속 열려 있어 끼어들 수 있습니다.</div></div>
-        <div id="liveTranscript" class="live-transcript">인식 대기</div>
-        <div class="small">AI가 말하는 중 짧게 “응” 하면 음량만 잠깐 낮아지고, 계속 말하면 답변이 취소됩니다. 추임새는 별도 저음량 채널로 재생됩니다. 스피커보다 헤드폰에서 에코 제거가 훨씬 안정적입니다.</div>
+        </details>
       </section>
     </div>
   </div>
