@@ -52,9 +52,7 @@ Copy-Item .env.example .env
 persona-duplex.bat
 ```
 
-기본값은 `balanced` 모드이며, 실행기가 Docker Desktop을 필요할 때만 시작하고 Ollama `qwen3:1.7b`와 Qwen ASR/TTS 모델을 준비한 뒤 실제 스택이 준비될 때까지 기다립니다. Compose 서비스는 재부팅 후 자동 재시작하지 않으며, 창에서 `Ctrl+C`를 누르면 실행된 서비스가 정리됩니다. `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`도 첫 번째 인자로 선택할 수 있습니다.
-
-Docker/GPU 없이도 UI, 목소리 프로필 CRUD, 페르소나 CRUD, WebSocket 전이중 오디오 이벤트를 검증하려면 다음 mock 실행기를 사용합니다. Windows에서는 `persona-duplex.bat mock` 또는 `.\\persona-duplex.ps1 start mock`을 실행할 수 있으며, mock 모드는 Python과 프로젝트 의존성만으로 `http://localhost:8080`을 엽니다. Linux/WSL2에서는 `./persona-duplex.sh start mock`이 Docker Compose 경로를 사용합니다.
+기본값은 `balanced` 모드이며, 실행기가 Docker Desktop과 GPU 런타임을 확인하고 Ollama `qwen3:1.7b` 및 Qwen ASR/TTS 모델을 준비한 뒤 실제 스택이 준비될 때까지 기다립니다. Compose 서비스는 재부팅 후 자동 재시작하지 않으며, 창에서 `Ctrl+C`를 누르면 실행된 서비스가 정리됩니다. `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`은 첫 번째 인자로 선택할 수 있고 모든 실행 모드는 실제 STT·TTS·LLM 공급자만 사용합니다.
 
 실행기 기본값은 Tailscale Funnel(`PUBLIC_TUNNEL=tailscale`)이며, 준비가 끝나면 Tailscale 도메인 외부 주소를 출력합니다. 원본 서버는 계속 `127.0.0.1:8080`에만 바인딩되고, 외부에는 게이트웨이 8080만 공개됩니다. 외부 공개를 끄려면 `.env`에 `PUBLIC_TUNNEL=off`를 설정하세요. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 선택한 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
 

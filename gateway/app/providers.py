@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import math
 import os
-import struct
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -623,35 +621,6 @@ class DeepgramRealtimeSTT(StreamingSTT):
         self._ws = None
 
 
-class MockSTT(StreamingSTT):
-    def __init__(self, transcript: str) -> None:
-        self.transcript = transcript
-        self.events = asyncio.Queue()
-        self._bytes = 0
-
-    async def start(self) -> None:
-        await self.events.put({"type": "ready", "engine": "mock-stt"})
-
-    async def send_audio(self, pcm16: bytes) -> None:
-        self._bytes += len(pcm16)
-        if self._bytes and self._bytes % 16000 < len(pcm16):
-            words = self.transcript.split()
-            visible = max(1, min(len(words), self._bytes // 16000))
-            await self.events.put({"type": "partial", "text": " ".join(words[:visible]), "language": "Korean"})
-
-    async def reset(self) -> None:
-        self._bytes = 0
-
-    async def finish(self, utterance_id: str) -> str:
-        text = self.transcript.strip() if self._bytes else ""
-        await self.events.put({"type": "final", "utterance_id": utterance_id, "text": text, "language": "Korean"})
-        self._bytes = 0
-        return text
-
-    async def close(self) -> None:
-        return None
-
-
 class StreamingLLM(ABC):
     @abstractmethod
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]: ...
@@ -787,17 +756,6 @@ class OpenAICompatibleLLM(StreamingLLM):
                         yield visible
 
 
-class MockLLM(StreamingLLM):
-    def __init__(self, reply: str = "좋아. 네 말을 들었고, 지금부터 자연스러운 실시간 음성 대화 흐름으로 답할게.") -> None:
-        self.reply = reply
-
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
-        del messages
-        for part in self.reply.split(" "):
-            await asyncio.sleep(0.025)
-            yield part + " "
-
-
 @dataclass(frozen=True)
 class TTSChunk:
     pcm16: bytes
@@ -866,45 +824,15 @@ class QwenTTSWebSocket(StreamingTTS):
                     raise ProviderError(str(event.get("message", "TTS failed")))
 
 
-class MockTTS(StreamingTTS):
-    async def stream(
-        self,
-        *,
-        profile_id: str,
-        text: str,
-        language: str,
-        chunk_size: int,
-        request_id: str,
-    ) -> AsyncIterator[TTSChunk]:
-        del profile_id, language, chunk_size, request_id
-        sample_rate = 24000
-        duration = max(0.22, min(2.2, len(text) * 0.045))
-        total = int(sample_rate * duration)
-        block = int(sample_rate * 0.12)
-        for start in range(0, total, block):
-            count = min(block, total - start)
-            values = bytearray()
-            for i in range(count):
-                t = (start + i) / sample_rate
-                envelope = min(1.0, (start + i) / 800) * min(1.0, (total - start - i) / 800)
-                sample = int(0.12 * envelope * math.sin(2 * math.pi * 220 * t) * 32767)
-                values.extend(struct.pack("<h", sample))
-            await asyncio.sleep(0.01)
-            yield TTSChunk(bytes(values), sample_rate, {"mock": True})
-
-
 def create_stt(
     mode: str,
     *,
     url: str,
     language: str,
-    mock_transcript: str,
     api_key: str = "",
     cloud_model: str = "scribe_v2_realtime",
     cloud_language_code: str = "ko",
 ) -> StreamingSTT:
-    if mode == "mock":
-        return MockSTT(mock_transcript)
     if mode == "qwen_ws":
         return QwenSTTWebSocket(url, language)
     if mode == "elevenlabs_ws":
@@ -938,8 +866,6 @@ def create_llm(
     max_tokens: int,
     timeout_seconds: float,
 ) -> StreamingLLM:
-    if mode == "mock":
-        return MockLLM()
     if mode == "openai_compatible":
         return OpenAICompatibleLLM(
             base_url=base_url,
@@ -953,8 +879,6 @@ def create_llm(
 
 
 def create_tts(mode: str, *, url: str) -> StreamingTTS:
-    if mode == "mock":
-        return MockTTS()
     if mode == "qwen_ws":
         return QwenTTSWebSocket(url)
     raise ValueError(f"unsupported TTS_MODE: {mode}")

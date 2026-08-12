@@ -30,6 +30,48 @@ require_key() {
   [[ -n "${!name:-}" ]] || { echo "ERROR: .env에 $name 값을 입력하세요."; exit 1; }
 }
 
+wait_http() {
+  local url="$1" timeout="${2:-180}" started now
+  started="$(date +%s)"
+  while true; do
+    if curl -fsS --max-time 8 "$url" >/dev/null 2>&1; then return 0; fi
+    now="$(date +%s)"
+    if (( now - started >= timeout )); then
+      echo "ERROR: 서비스 준비 시간 초과: $url" >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+warm_http_service() {
+  local url="$1"
+  wait_http "$url/health" 240
+  curl -fsS --max-time 900 -X POST "$url/warmup" >/dev/null
+}
+
+verify_real_stack() {
+  local requested_mode="$1" selected_stt=""
+  if [[ "$requested_mode" == "selected" && -f benchmark/selected_stt.env ]]; then
+    load_env_file benchmark/selected_stt.env
+    selected_stt="${STT_MODE:-}"
+  fi
+  if [[ "$requested_mode" =~ ^(balanced|accuracy)$ || "$selected_stt" == "qwen_ws" ]]; then
+    warm_http_service "http://127.0.0.1:${ASR_PORT:-8101}"
+  fi
+  if [[ "$requested_mode" =~ ^(balanced|accuracy|selected|cloud-stt|cloud-elevenlabs|cloud-soniox|cloud-deepgram)$ ]]; then
+    warm_http_service "http://127.0.0.1:${TTS_PORT:-8102}"
+  fi
+  wait_http "http://127.0.0.1:${GATEWAY_PORT:-8080}/api/health" 180
+  local health
+  health="$(curl -fsS --max-time 15 "http://127.0.0.1:${GATEWAY_PORT:-8080}/api/health")"
+  if ! grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$health"; then
+    echo "ERROR: 실전 스택 health가 통과하지 못했습니다: $health" >&2
+    return 1
+  fi
+  echo "Real stack: Qwen/LLM health OK"
+}
+
 start_local() {
   local model="$1" util="$2"
   export STT_MODE=qwen_ws TTS_MODE=qwen_ws LLM_MODE="${LLM_MODE:-openai_compatible}"
@@ -84,12 +126,8 @@ doctor() {
 
 start_mode() {
   ensure_env
+  load_env_file .env
   case "$1" in
-    mock)
-      compose --profile local-asr --profile local-tts stop qwen-asr qwen-tts >/dev/null 2>&1 || true
-      export STT_MODE=mock TTS_MODE=mock LLM_MODE=mock
-      compose up --build -d gateway
-      ;;
     balanced) start_local Qwen/Qwen3-ASR-0.6B 0.35 ;;
     accuracy) start_local Qwen/Qwen3-ASR-1.7B 0.44 ;;
     selected) start_selected ;;
@@ -98,6 +136,7 @@ start_mode() {
     cloud-deepgram) start_cloud deepgram_ws nova-3 DEEPGRAM_API_KEY ;;
     *) echo "Unknown mode: $1"; exit 2 ;;
   esac
+  verify_real_stack "$1"
   echo "UI: http://localhost:${GATEWAY_PORT:-8080}"
   echo "Health: http://localhost:${GATEWAY_PORT:-8080}/api/health"
 }
@@ -113,7 +152,6 @@ case "$ACTION" in
     cat <<'USAGE'
 Usage:
   ./persona-duplex.sh doctor
-  ./persona-duplex.sh start mock
   ./persona-duplex.sh start balanced
   ./persona-duplex.sh start accuracy
   ./persona-duplex.sh start selected

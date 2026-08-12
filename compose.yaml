@@ -57,7 +57,6 @@ services:
       MAX_HISTORY_MESSAGES: ${MAX_HISTORY_MESSAGES:-18}
       MAX_CLAUSE_CHARS: ${MAX_CLAUSE_CHARS:-54}
       MIN_CLAUSE_CHARS: ${MIN_CLAUSE_CHARS:-8}
-      MOCK_TRANSCRIPT: ${MOCK_TRANSCRIPT:-안녕. 지금 음성 대화 기능을 시험하고 있어.}
     volumes:
       - ./data/benchmark:/data/benchmark
       - ./data/personas:/data/personas

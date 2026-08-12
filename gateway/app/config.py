@@ -18,7 +18,7 @@ class Settings:
     port: int = int(os.getenv("GATEWAY_PORT", "8080"))
     app_name: str = "Persona Duplex"
 
-    # STT: qwen_ws, elevenlabs_ws, soniox_ws, deepgram_ws, mock
+    # STT: qwen_ws, elevenlabs_ws, soniox_ws, deepgram_ws
     stt_mode: str = os.getenv("STT_MODE", "qwen_ws")
     stt_ws_url: str = os.getenv("STT_WS_URL", "ws://qwen-asr:8101/ws")
     stt_http_url: str = os.getenv("STT_HTTP_URL", "http://qwen-asr:8101")
@@ -30,7 +30,7 @@ class Settings:
     deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
     stt_cloud_language_code: str = os.getenv("STT_CLOUD_LANGUAGE_CODE", "ko")
 
-    # TTS: qwen_ws, mock
+    # TTS: qwen_ws
     tts_mode: str = os.getenv("TTS_MODE", "qwen_ws")
     tts_ws_url: str = os.getenv("TTS_WS_URL", "ws://qwen-tts:8102/ws/synthesize")
     tts_http_url: str = os.getenv("TTS_HTTP_URL", "http://qwen-tts:8102")
@@ -74,7 +74,6 @@ class Settings:
 
     client_origin: str = os.getenv("CLIENT_ORIGIN", "*")
     allow_remote_microphone: bool = _env_bool("ALLOW_REMOTE_MICROPHONE", False)
-    mock_transcript: str = os.getenv("MOCK_TRANSCRIPT", "안녕. 지금 음성 대화 기능을 시험하고 있어.")
 
 
 settings = Settings()

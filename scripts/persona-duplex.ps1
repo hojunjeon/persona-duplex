@@ -1,7 +1,7 @@
 ﻿param(
   [ValidateSet("doctor", "start", "run", "stop", "logs", "status", "build", "help")]
   [string]$Action = "help",
-  [ValidateSet("mock", "balanced", "accuracy", "selected", "cloud-stt", "cloud-elevenlabs", "cloud-soniox", "cloud-deepgram")]
+  [ValidateSet("balanced", "accuracy", "selected", "cloud-stt", "cloud-elevenlabs", "cloud-soniox", "cloud-deepgram")]
   [string]$Mode = "balanced"
 )
 $ErrorActionPreference = "Stop"
@@ -10,7 +10,6 @@ Set-Location $Root
 $script:TunnelProcess = $null
 $script:PublicTunnelUrl = $null
 $script:TunnelKind = $null
-$script:MockProcess = $null
 
 function Ensure-Env {
   if (-not (Test-Path ".env")) {
@@ -94,6 +93,31 @@ function Invoke-Warmup([string]$Url, [int]$TimeoutSec = 900) {
   } catch {
     throw "모델 warmup 실패 ($Url): $($_.Exception.Message)"
   }
+}
+
+function Verify-RealStack([string]$RequestedMode) {
+  Import-DotEnv ".env"
+  $selectedStt = ""
+  if ($RequestedMode -eq "selected" -and (Test-Path "benchmark/selected_stt.env")) {
+    Import-DotEnv "benchmark/selected_stt.env"
+    $selectedStt = [string]$env:STT_MODE
+  }
+  if ($RequestedMode -in @("balanced", "accuracy") -or $selectedStt -eq "qwen_ws") {
+    $asrPort = if ($env:ASR_PORT) { $env:ASR_PORT } else { "8101" }
+    Wait-Http "http://127.0.0.1:$asrPort/health" 240
+    Invoke-Warmup "http://127.0.0.1:$asrPort/warmup" 900
+  }
+  if ($RequestedMode -in @("balanced", "accuracy", "selected", "cloud-stt", "cloud-elevenlabs", "cloud-soniox", "cloud-deepgram")) {
+    $ttsPort = if ($env:TTS_PORT) { $env:TTS_PORT } else { "8102" }
+    Wait-Http "http://127.0.0.1:$ttsPort/health" 240
+    Invoke-Warmup "http://127.0.0.1:$ttsPort/warmup" 900
+  }
+  Ensure-LlmReady
+  $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+  Wait-Http "http://127.0.0.1:$gatewayPort/api/health" 180
+  $health = Invoke-RestMethod -Uri "http://127.0.0.1:$gatewayPort/api/health" -TimeoutSec 15
+  if (-not $health.ok) { throw "실전 스택 health가 통과하지 못했습니다: $($health | ConvertTo-Json -Depth 6 -Compress)" }
+  Write-Host "Real stack: Qwen/LLM health OK"
 }
 
 function Ensure-Ollama {
@@ -489,75 +513,9 @@ function Start-Selected([switch]$Foreground) {
   }
 }
 
-function Get-PythonLauncher {
-  $py = Get-Command py.exe -ErrorAction SilentlyContinue
-  if ($py -and $py.Path) { return $py.Path }
-  $python = Get-Command python.exe -ErrorAction SilentlyContinue
-  if ($python -and $python.Path) { return $python.Path }
-  $python = Get-Command python -ErrorAction SilentlyContinue
-  if ($python -and $python.Path) { return $python.Path }
-  throw "Python 실행기를 찾지 못했습니다. Python 3.10 이상을 설치하세요."
-}
-
-function Set-MockEnvironment {
-  Ensure-Env
-  Import-DotEnv ".env"
-  $env:STT_MODE="mock"; $env:TTS_MODE="mock"; $env:LLM_MODE="mock"
-  $env:GATEWAY_HOST="127.0.0.1"
-  if ([string]::IsNullOrWhiteSpace($env:GATEWAY_PORT)) { $env:GATEWAY_PORT="8080" }
-  $env:PERSONA_DIR=(Join-Path $Root "gateway\personas")
-  $env:PERSONA_DATA_DIR=(Join-Path $Root "data\personas")
-  $env:BENCHMARK_DIR=(Join-Path $Root "data\benchmark")
-  $env:VOICE_PROFILE_DIR=(Join-Path $Root "data\voices")
-  foreach ($directory in @($env:PERSONA_DATA_DIR, $env:BENCHMARK_DIR, $env:VOICE_PROFILE_DIR)) {
-    New-Item -ItemType Directory -Force -Path $directory | Out-Null
-  }
-  $env:PUBLIC_TUNNEL="off"
-}
-
-function Stop-MockGateway {
-  $pidFile = Join-Path $Root ".persona-duplex-mock.pid"
-  if (Test-Path -LiteralPath $pidFile) {
-    $mockPid = 0
-    try { $mockPid = [int](Get-Content -Raw -LiteralPath $pidFile) } catch {}
-    if ($mockPid -gt 0) {
-      try { Stop-Process -Id $mockPid -Force -ErrorAction SilentlyContinue } catch {}
-    }
-    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
-  }
-}
-
-function Start-MockGateway([switch]$Foreground) {
-  Set-MockEnvironment
-  $python = Get-PythonLauncher
-  $gatewayDir = Join-Path $Root "gateway"
-  $arguments = @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", $env:GATEWAY_PORT)
-  $pidFile = Join-Path $Root ".persona-duplex-mock.pid"
-  if ($Foreground) {
-    Write-Host "Persona Duplex mock 서버를 직접 실행합니다 (Docker 불필요)."
-    Push-Location $gatewayDir
-    try { & $python @arguments } finally { Pop-Location }
-    return
-  }
-  Stop-MockGateway
-  $logDir = Join-Path $Root "data\logs"
-  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-  $stdoutPath = Join-Path $logDir "mock-gateway.stdout.log"
-  $stderrPath = Join-Path $logDir "mock-gateway.stderr.log"
-  $process = Start-Process -FilePath $python -ArgumentList $arguments -WorkingDirectory $gatewayDir -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
-  $script:MockProcess = $process
-  Set-Content -LiteralPath $pidFile -Value $process.Id -NoNewline
-  Write-Host "Persona Duplex mock 서버를 백그라운드로 시작했습니다. PID: $($process.Id)"
-}
-
 function Start-RequestedMode([string]$RequestedMode, [switch]$Foreground) {
-  if ($RequestedMode -ne "mock") { Ensure-Ollama }
+  Ensure-Ollama
   switch ($RequestedMode) {
-    "mock" {
-      try { & docker compose --profile local-asr --profile local-tts stop qwen-asr qwen-tts *> $null } catch {}
-      $env:STT_MODE="mock"; $env:TTS_MODE="mock"; $env:LLM_MODE="mock"
-      Invoke-Up -Profiles @() -Services @("gateway") -Foreground:$Foreground
-    }
     "balanced" { Start-Local "Qwen/Qwen3-ASR-0.6B" "0.75" -Foreground:$Foreground }
     "accuracy" { Start-Local "Qwen/Qwen3-ASR-1.7B" "0.80" -Foreground:$Foreground }
     "selected" { Start-Selected -Foreground:$Foreground }
@@ -597,67 +555,44 @@ if ($Action -eq "doctor") {
 
 if ($Action -eq "start") {
   Ensure-Env
-  if ($Mode -eq "mock") {
-    try {
-      Start-MockGateway
-      $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-      Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 30
-      Write-UiUrls
-    } catch {
-      Stop-MockGateway
-      throw
-    }
-  } else {
-    Ensure-Docker
-    try {
-      Start-RequestedMode $Mode
-      $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-      Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
-      Start-PublicTunnel
-      Write-UiUrls
-    } catch {
-      Stop-PublicTunnel
-      Stop-AllServices
-      throw
-    }
+  Ensure-Docker
+  try {
+    Start-RequestedMode $Mode
+    $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Verify-RealStack $Mode
+    Start-PublicTunnel
+    Write-UiUrls
+  } catch {
+    Stop-PublicTunnel
+    Stop-AllServices
+    throw
   }
   exit 0
 }
 
 if ($Action -eq "run") {
   Ensure-Env
-  if ($Mode -eq "mock") {
-    Write-Host "Persona Duplex mock 서버를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
-    try {
-      Start-MockGateway
-      $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-      Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 30
-      Write-UiUrls
-      while ($script:MockProcess -and -not $script:MockProcess.HasExited) { Start-Sleep -Seconds 2 }
-    } finally {
-      Stop-MockGateway
-    }
-  } else {
-    Ensure-Docker
-    Write-Host "Persona Duplex를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
-    try {
-      Start-RequestedMode $Mode
-      $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-      Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
-      Start-PublicTunnel
-      Write-UiUrls
-      Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200
-    } finally {
-      Stop-PublicTunnel
-      Write-Host "실행된 Persona Duplex 서비스를 종료합니다..."
-      Stop-AllServices
-    }
+  Ensure-Docker
+  Write-Host "Persona Duplex를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
+  try {
+    Start-RequestedMode $Mode
+    $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Verify-RealStack $Mode
+    Start-PublicTunnel
+    Write-UiUrls
+    Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200
+  } finally {
+    Stop-PublicTunnel
+    Write-Host "실행된 Persona Duplex 서비스를 종료합니다..."
+    Stop-AllServices
   }
   exit 0
 }
 
 switch ($Action) {
-  "stop" { Stop-PublicTunnel; Stop-MockGateway; if (Get-Command docker -ErrorAction SilentlyContinue) { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans } }
+  "stop" { Stop-PublicTunnel; Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans }
   "logs" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200 }
   "status" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm ps }
   "build" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm build }
@@ -665,7 +600,6 @@ switch ($Action) {
     Write-Host @"
 Usage:
   .\persona-duplex.ps1 doctor
-  .\persona-duplex.ps1 start mock
   .\persona-duplex.ps1 start balanced
   .\persona-duplex.ps1 start accuracy
   .\persona-duplex.ps1 start selected

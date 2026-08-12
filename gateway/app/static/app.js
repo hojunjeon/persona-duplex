@@ -779,7 +779,7 @@ async function startConversation() {
     throw new Error("사용할 페르소나를 선택하세요.");
   }
   const profileId = $("voiceSelect").value;
-  if (!profileId && state.config.tts_mode !== "mock") throw new Error("사용할 목소리 프로필을 선택하세요.");
+  if (!profileId) throw new Error("사용할 목소리 프로필을 선택하세요.");
   state.activePersonaId = personaId;
   await player.ensure();
   setPersonaControlsDisabled(true);

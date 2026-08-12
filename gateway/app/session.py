@@ -95,7 +95,7 @@ class VoiceSession:
                 "type": "session.ready",
                 "persona": self.persona.persona_id,
                 "persona_name": self.persona.name,
-                "requires_voice_profile": self.settings.tts_mode != "mock",
+                "requires_voice_profile": True,
             }
         )
         await self._set_state("idle")
@@ -338,7 +338,7 @@ class VoiceSession:
             self._pending_finalizations = max(0, self._pending_finalizations - 1)
 
     async def _respond(self) -> None:
-        if not self.voice_profile_id and self.settings.tts_mode != "mock":
+        if not self.voice_profile_id:
             await self.send_json(
                 {"type": "error", "source": "voice", "message": "먼저 목소리 프로필을 녹음해 등록해야 합니다."}
             )
@@ -473,7 +473,7 @@ class VoiceSession:
             await self.send_json({"type": "warning", "message": f"추임새 생성 실패: {exc}"})
 
     async def _play_backchannel(self, text: str) -> None:
-        if not self.voice_profile_id and self.settings.tts_mode != "mock":
+        if not self.voice_profile_id:
             return
         self._stream_seq += 1
         stream_id = self._stream_seq
