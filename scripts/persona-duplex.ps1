@@ -414,18 +414,6 @@ function Stop-PublicTunnel {
   $script:TunnelKind = $null
 }
 
-function Try-StartPublicTunnel {
-  try {
-    Start-PublicTunnel
-    return $true
-  } catch {
-    $message = $_.Exception.Message
-    Stop-PublicTunnel
-    Write-Warning "외부 터널을 사용할 수 없어 로컬 UI로 계속합니다: $message"
-    return $false
-  }
-}
-
 function Complete-RealStart([switch]$Asr, [switch]$Tts, [switch]$Foreground, [string[]]$Services) {
   Ensure-QwenReady -Asr:$Asr -Tts:$Tts
   Ensure-LlmReady
@@ -549,7 +537,7 @@ if ($Action -eq "start") {
     Start-RequestedMode $Mode
     $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
     Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
-    Try-StartPublicTunnel | Out-Null
+    Start-PublicTunnel
     Write-UiUrls
   } catch {
     Stop-PublicTunnel
@@ -567,7 +555,7 @@ if ($Action -eq "run") {
     Start-RequestedMode $Mode
     $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
     Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
-    Try-StartPublicTunnel | Out-Null
+    Start-PublicTunnel
     Write-UiUrls
     Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200
   } finally {
