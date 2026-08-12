@@ -427,6 +427,9 @@ function Invoke-Up([string[]]$Profiles, [string[]]$Services, [switch]$Foreground
   $composeArgs = @()
   foreach ($profile in $Profiles) { $composeArgs += @("--profile", $profile) }
   $composeArgs += @("up")
+  # The gateway serves source files from the image. Always rebuild local
+  # source-backed services so a launcher restart cannot keep an older image
+  # and hide newly implemented UI/API features.
   $buildRequired = $false
   foreach ($service in $Services) {
     $image = switch ($service) {
@@ -436,8 +439,8 @@ function Invoke-Up([string[]]$Profiles, [string[]]$Services, [switch]$Foreground
       default { $null }
     }
     if ($image) {
+      $buildRequired = $true
       & docker image inspect $image *> $null
-      if ($LASTEXITCODE -ne 0) { $buildRequired = $true }
     }
   }
   if ($buildRequired) { $composeArgs += "--build" }
