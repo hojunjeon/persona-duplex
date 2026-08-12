@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 rem Double-click launcher. Pass a mode as the first argument when needed.
-rem Examples: persona-duplex.bat balanced | persona-duplex.bat accuracy
+rem Examples: persona-duplex.bat mock | persona-duplex.bat balanced | persona-duplex.bat accuracy
 set "PERSONA_MODE=%~1"
 if not defined PERSONA_MODE set "PERSONA_MODE=balanced"
 
