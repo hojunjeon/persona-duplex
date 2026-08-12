@@ -497,9 +497,9 @@ def warm_profile(profile_id: str) -> dict[str, Any]:
 
 @app.patch("/profiles/{profile_id}")
 async def update_profile(profile_id: str, request: Request) -> dict[str, Any]:
-    updates = await _read_profile_update(request)
     path = _profile_path(profile_id)
     metadata_path = path / "metadata.json"
+    updates = await _read_profile_update(request)
     profile = _read_profile(profile_id)
     key_before = _prompt_key(profile)
     metadata = {key: value for key, value in profile.items() if key != "audio_path"}
@@ -513,7 +513,6 @@ async def update_profile(profile_id: str, request: Request) -> dict[str, Any]:
         _prompt_cache.pop(key_before, None)
         if key_after != key_before:
             _prompt_cache.pop(key_after, None)
-    metadata["audio_path"] = str(path / "reference.wav")
     return metadata
 
 

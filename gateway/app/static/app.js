@@ -407,8 +407,10 @@ async function editVoice(id) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ display_name: displayName, transcript }),
   });
+  setMessage("프로필 수정 완료. 모델 warm-up 중…");
+  await api(`/api/voices/${encodeURIComponent(id)}/warmup`, { method: "POST" });
   await refreshVoices(id);
-  setMessage(`프로필 수정 완료: ${response.display_name || displayName}`);
+  setMessage(`프로필 수정 및 warm-up 완료: ${response.display_name || displayName}`);
 }
 
 async function deleteVoice(id) {
