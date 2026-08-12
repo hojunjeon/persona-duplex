@@ -29,6 +29,12 @@
         <div class="field">
           <label for="referenceText">녹음하면서 정확히 읽을 문장</label>
           <textarea id="referenceText">안녕하세요. 지금 제 목소리를 복제하기 위한 기준 음성을 녹음하고 있습니다. 저는 평소 말하는 속도와 높이로 또렷하고 자연스럽게 이 문장을 읽고 있습니다.</textarea>
+          <div class="small">녹음하거나 파일을 선택할 때 이 대본을 실제로 정확히 읽어 주세요. 8~20초 분량을 권장합니다. <span id="referenceUploadLimit">파일 크기 제한을 불러오는 중</span>.</div>
+        </div>
+        <div class="field">
+          <label for="referenceUpload">기존 기준 음성 파일 선택</label>
+          <input id="referenceUpload" type="file" accept=".webm,.wav,.mp4,.m4a,.ogg,.opus,audio/*" />
+          <div id="referenceSource" class="small" aria-live="polite"></div>
         </div>
         <div class="actions">
           <button id="recordReference" class="primary">기준 음성 녹음</button>
@@ -65,6 +71,50 @@
               <button id="stopConversation" class="danger" disabled>중지</button>
             </div>
           </div>
+          <details id="personaCreatePanel" class="persona-create">
+            <summary>새 페르소나 만들기</summary>
+            <div class="persona-create-grid">
+              <div class="field">
+                <label for="personaName">이름</label>
+                <input id="personaName" maxlength="200" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="personaIdentity">정체성</label>
+                <input id="personaIdentity" maxlength="200" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="personaRelationship">관계</label>
+                <input id="personaRelationship" maxlength="200" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="personaMaxSentences">기본 문장 수 (1~8)</label>
+                <input id="personaMaxSentences" type="number" min="1" max="8" value="3" />
+              </div>
+              <div class="field">
+                <label for="personaSpeakingStyle">말투 (한 줄에 하나)</label>
+                <textarea id="personaSpeakingStyle" maxlength="3400"></textarea>
+              </div>
+              <div class="field">
+                <label for="personaBehavior">행동 (한 줄에 하나)</label>
+                <textarea id="personaBehavior" maxlength="3400"></textarea>
+              </div>
+              <div class="field">
+                <label for="personaBoundaries">경계 (한 줄에 하나)</label>
+                <textarea id="personaBoundaries" maxlength="3400"></textarea>
+              </div>
+              <div class="field">
+                <label for="personaBackchannels">추임새 (한 줄에 하나)</label>
+                <textarea id="personaBackchannels" maxlength="3400">응.
+음.
+아하.</textarea>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="createPersona" class="primary">페르소나 생성</button>
+              <span id="personaCreateMessage" class="small" aria-live="polite"></span>
+            </div>
+            <p class="small">생성한 페르소나는 선택 목록에만 추가됩니다. 대화는 자동으로 시작하지 않으며, 저장 후 재시작해도 유지됩니다.</p>
+          </details>
           <div class="meter" style="margin-top:12px"><div id="micMeter"></div></div>
           <div class="metrics">
             <div><span>STT 확정</span><strong id="metricStt">-</strong></div>

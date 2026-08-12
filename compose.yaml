@@ -14,6 +14,7 @@ services:
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8080
       PERSONA_DIR: /app/personas
+      PERSONA_DATA_DIR: /data/personas
       DEFAULT_PERSONA: ${DEFAULT_PERSONA:-default}
       BENCHMARK_DIR: /data/benchmark
       STT_MODE: ${STT_MODE:-qwen_ws}
@@ -31,6 +32,7 @@ services:
       TTS_HTTP_URL: ${TTS_HTTP_URL:-http://qwen-tts:8102}
       TTS_LANGUAGE: ${TTS_LANGUAGE:-Korean}
       TTS_CHUNK_SIZE: ${TTS_CHUNK_SIZE:-4}
+      VOICE_MAX_UPLOAD_BYTES: ${VOICE_MAX_UPLOAD_BYTES:-33554432}
       LLM_MODE: ${LLM_MODE:-openai_compatible}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
@@ -58,6 +60,7 @@ services:
       MOCK_TRANSCRIPT: ${MOCK_TRANSCRIPT:-안녕. 지금 음성 대화 기능을 시험하고 있어.}
     volumes:
       - ./data/benchmark:/data/benchmark
+      - ./data/personas:/data/personas
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/config"]
       interval: 10s
@@ -160,6 +163,7 @@ services:
       TTS_CHUNK_SIZE: ${TTS_CHUNK_SIZE:-4}
       TTS_PROMPT_CACHE_SIZE: ${TTS_PROMPT_CACHE_SIZE:-8}
       VOICE_PROFILE_DIR: /data/voices
+      VOICE_MAX_UPLOAD_BYTES: ${VOICE_MAX_UPLOAD_BYTES:-33554432}
       VOICE_MIN_SECONDS: ${VOICE_MIN_SECONDS:-3}
       VOICE_MAX_SECONDS: ${VOICE_MAX_SECONDS:-45}
     volumes:

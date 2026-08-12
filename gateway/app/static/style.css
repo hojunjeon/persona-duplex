@@ -43,6 +43,13 @@ h1 { margin: 0; font-size: 25px; }
 .voice-card.selected { border-color: var(--accent); }
 .conversation { min-height: 690px; display: grid; grid-template-rows: auto 1fr auto auto; }
 .controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 9px; align-items: end; }
+.persona-create { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0f151f; }
+.persona-create summary { cursor: pointer; padding: 10px 12px; color: var(--accent); font-size: 13px; }
+.persona-create[open] summary { border-bottom: 1px solid var(--line); }
+.persona-create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px 12px 2px; }
+.persona-create-grid .field { margin-bottom: 8px; }
+.persona-create .actions, .persona-create > p { margin: 0 12px 12px; }
+.persona-create.disabled { opacity: .72; }
 .log { margin-top: 14px; padding: 12px; border-radius: 12px; background: #0c1119; overflow-y: auto; min-height: 430px; max-height: 530px; }
 .bubble { max-width: 82%; padding: 11px 13px; border-radius: 14px; margin: 8px 0; line-height: 1.55; white-space: pre-wrap; }
 .bubble.user { margin-left: auto; background: var(--user); }
@@ -59,6 +66,7 @@ h1 { margin: 0; font-size: 25px; }
   .grid { grid-template-columns: 1fr; }
   .conversation { min-height: 620px; }
   .controls { grid-template-columns: 1fr; }
+  .persona-create-grid { grid-template-columns: 1fr; }
 }
 .runtime-info { margin-top: 7px; color: var(--muted); font-size: 11px; text-align: right; }
 .metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; margin-top: 10px; }

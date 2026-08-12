@@ -17,9 +17,18 @@ data/voices/<profile_id>/reference.wav
 data/voices/<profile_id>/metadata.json
 data/benchmark/samples/
 data/benchmark/manifest.csv
+data/personas/<id>.yaml       # UI에서 생성한 텍스트 페르소나
 ```
 
 ZIP 배포본에는 실제 음성을 넣지 않습니다.
+
+페르소나 생성 API(`POST /api/personas`)는 별도 인증 없이 동작하는 trusted-local
+기능입니다. 기본 Compose 포트는 `127.0.0.1`에만 바인딩되지만, 포트나 터널을 외부에
+노출하면 누구나 대화 프롬프트를 추가할 수 있습니다. CORS 설정만으로 접근 제어가
+되지 않으므로 외부 공개 전에는 인증·CSRF/Origin 정책·속도 제한을 추가해야 합니다.
+기본 `gateway/personas`는 변경하지 못하며 생성 파일은 `/data/personas`(호스트의
+`data/personas`)에 원자적으로 저장됩니다. 현재 수정·삭제·가져오기·소유권 기능은
+범위에 포함하지 않습니다.
 
 ## 외부 전송
 

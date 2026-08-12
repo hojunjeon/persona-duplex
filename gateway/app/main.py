@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .persona import list_personas
+from .persona import PersonaConflictError, PersonaValidationError, list_personas, save_persona
 from .providers import create_llm, create_stt, create_tts
 from .session import VoiceSession
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
+VOICE_MAX_UPLOAD_BYTES = int(os.getenv("VOICE_MAX_UPLOAD_BYTES", str(32 * 1024 * 1024)))
+VOICE_ALLOWED_SUFFIXES = {".webm", ".wav", ".mp4", ".m4a", ".ogg", ".opus"}
 
 app = FastAPI(title=settings.app_name, version="1.0")
 app.add_middleware(
@@ -61,7 +64,8 @@ def public_config() -> dict[str, Any]:
         "llm_mode": settings.llm_mode,
         "llm_model": settings.llm_model,
         "default_persona": settings.default_persona,
-        "personas": list_personas(settings.persona_dir),
+        "voice_max_upload_bytes": VOICE_MAX_UPLOAD_BYTES,
+        "personas": list_personas(settings.persona_dir, settings.persona_data_dir),
         "audio": {
             "input_sample_rate": 16000,
             "barge_in_confirm_ms": settings.barge_in_confirm_ms,
@@ -74,6 +78,28 @@ def public_config() -> dict[str, Any]:
             "vad_noise_multiplier_assistant": settings.vad_noise_multiplier_assistant,
             "vad_noise_multiplier_idle": settings.vad_noise_multiplier_idle,
         },
+    }
+
+
+@app.get("/api/personas")
+def get_personas() -> list[dict[str, str]]:
+    return list_personas(settings.persona_dir, settings.persona_data_dir)
+
+
+@app.post("/api/personas", status_code=201)
+def create_persona(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        persona = save_persona(settings.persona_data_dir, payload, builtin_dir=settings.persona_dir)
+    except PersonaConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (PersonaValidationError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="페르소나를 저장하지 못했습니다.") from exc
+    return {
+        "ok": True,
+        "persona": persona.summary(),
+        "personas": list_personas(settings.persona_dir, settings.persona_data_dir),
     }
 
 
@@ -90,6 +116,60 @@ async def _service_json(method: str, url: str, **kwargs: Any) -> Any:
         if not response.content:
             return {"ok": True}
         return response.json()
+
+
+def _safe_upload_filename(filename: str | None) -> str:
+    """Keep only a client filename's basename before forwarding it downstream."""
+    basename = re.split(r"[\\/]", filename or "")[-1].strip()
+    return basename or "reference.webm"
+
+
+def _upload_limit_label(max_bytes: int) -> str:
+    mebibyte = 1024 * 1024
+    if max_bytes % mebibyte == 0:
+        return f"{max_bytes // mebibyte} MiB"
+    return f"{max_bytes}바이트"
+
+
+async def _read_upload_limited(upload: UploadFile, max_bytes: int | None = None) -> bytes:
+    max_bytes = VOICE_MAX_UPLOAD_BYTES if max_bytes is None else max_bytes
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"녹음 파일은 {_upload_limit_label(max_bytes)} 이하이어야 합니다.",
+            )
+        chunks.append(chunk)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="빈 녹음 파일입니다.")
+    return b"".join(chunks)
+
+
+def _validate_voice_enrollment(
+    *, audio: UploadFile, transcript: str, display_name: str, consent: bool
+) -> tuple[str, str, str]:
+    filename = _safe_upload_filename(audio.filename)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in VOICE_ALLOWED_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail="지원하지 않는 기준 음성 형식입니다. webm, wav, mp4, m4a, ogg, opus만 사용할 수 있습니다.",
+        )
+    if not consent:
+        raise HTTPException(status_code=400, detail="본인 목소리 또는 허가받은 목소리라는 동의가 필요합니다.")
+    normalized_transcript = re.sub(r"\s+", " ", transcript).strip()
+    if len(normalized_transcript) < 5 or len(normalized_transcript) > 1000:
+        raise HTTPException(status_code=400, detail="참조 대본은 5~1000자여야 합니다.")
+    normalized_name = re.sub(r"\s+", " ", display_name).strip() or "내 목소리"
+    if len(normalized_name) > 80:
+        raise HTTPException(status_code=400, detail="프로필 이름은 80자 이하여야 합니다.")
+    return filename, normalized_transcript, normalized_name
 
 
 @app.get("/api/health")
@@ -191,9 +271,11 @@ async def enroll_voice(
     display_name: str = Form("내 목소리"),
     consent: bool = Form(...),
 ) -> Any:
+    filename, transcript, display_name = _validate_voice_enrollment(
+        audio=audio, transcript=transcript, display_name=display_name, consent=consent
+    )
+    payload = await _read_upload_limited(audio)
     if settings.tts_mode == "mock":
-        if not consent:
-            raise HTTPException(status_code=400, detail="동의가 필요합니다.")
         return {
             "profile_id": "mock-voice",
             "display_name": display_name,
@@ -201,8 +283,7 @@ async def enroll_voice(
             "seconds": 8.0,
             "consent_recorded": True,
         }
-    payload = await audio.read()
-    files = {"audio": (audio.filename or "reference.webm", payload, audio.content_type or "application/octet-stream")}
+    files = {"audio": (filename, payload, audio.content_type or "application/octet-stream")}
     data = {"transcript": transcript, "display_name": display_name, "consent": str(consent).lower()}
     return await _service_json("POST", f"{settings.tts_http_url}/profiles", files=files, data=data)
 

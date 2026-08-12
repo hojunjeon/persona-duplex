@@ -11,3 +11,5 @@ data/results/*
 !data/results/.gitkeep
 data/voices/*
 !data/voices/.gitkeep
+data/personas/*
+!data/personas/.gitkeep

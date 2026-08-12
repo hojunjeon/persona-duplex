@@ -2,16 +2,25 @@
 
 ## 입력되는 목소리 정보
 
-Persona Duplex는 참조 WAV와 그 음성에서 실제로 읽은 정확한 대본을 Qwen3-TTS Base 모델에 전달합니다. 공식 `qwen-tts` backend에서는 `create_voice_clone_prompt(..., x_vector_only_mode=False)`로 reusable full-ICL prompt를 만들고, `faster-qwen3-tts` backend에서는 공개 API대로 `ref_audio`와 `ref_text`를 스트리밍 생성 호출에 직접 전달합니다. 두 경로 모두 단일 화자 임베딩만 쓰는 x-vector-only 모드가 아니라 참조 내용과 음향 문맥을 함께 쓰는 경로를 목표로 합니다.
+Persona Duplex는 참조 음성과 그 음성에서 실제로 읽은 정확한 대본을 Qwen3-TTS Base 모델에 전달합니다. 브라우저에서는 `.webm`, `.wav`, `.mp4`, `.m4a`, `.ogg`, `.opus` 파일을 선택하거나 MediaRecorder로 녹음할 수 있고, 선택한 실제 파일명과 미리보기를 표시합니다. 파일 크기는 실행 시 표시되는 한도(기본 32MiB) 이하여야 합니다. 공식 `qwen-tts` backend에서는 `create_voice_clone_prompt(..., x_vector_only_mode=False)`로 reusable full-ICL prompt를 만들고, `faster-qwen3-tts` backend에서는 공개 API대로 `ref_audio`와 `ref_text`를 스트리밍 생성 호출에 직접 전달합니다. 두 경로 모두 단일 화자 임베딩만 쓰는 x-vector-only 모드가 아니라 참조 내용과 음향 문맥을 함께 쓰는 경로를 목표로 합니다.
 
 ```text
-reference.wav + exact transcript
+reference audio (webm/wav/mp4/m4a/ogg/opus) + exact transcript
   → 음향/화자/운율 조건 토큰
   → full-ICL 음성 조건
   → backend별 prompt/reference cache
   + 새 텍스트
   → 합성 음성
 ```
+
+## 업로드 검증 경계
+
+- 권장 길이는 8~20초이며, 서버 허용 범위는 3~45초입니다.
+- 대본은 공백을 정리한 뒤 5~1000자, 프로필 이름은 80자 이하이고 동의 확인이 필요합니다.
+- 파일 확장자는 위 목록만 허용합니다. `audio/*` MIME은 브라우저 안내와 downstream 전달에만 쓰는 advisory 값이며, 확장자와 MIME이 달라도 ffmpeg가 실제 디코드를 최종 판단합니다.
+- 빈 파일·실행 시 표시된 한도 초과·디코드 실패·길이 범위 밖 파일은 등록되지 않습니다. 업로드 파일명은 basename만 전달되어 경로 탈출에 사용되지 않습니다.
+- gateway와 Qwen TTS 서비스는 동일한 `VOICE_MAX_UPLOAD_BYTES` 환경변수(기본 33554432)를 사용하며, `/api/config`가 실제 바이트 한도를 UI에 전달합니다. Qwen TTS는 청크 단위로 읽고 임시 source를 요청 종료 시 정리합니다.
+- 정규화가 끝나면 프로필에는 24kHz mono WAV와 SHA-256/품질 진단이 저장되고, 원본 임시 파일은 보존하지 않습니다.
 
 ## 잘 복제되는 요소
 

@@ -1,9 +1,19 @@
 const $ = (id) => document.getElementById(id);
+const DEFAULT_REFERENCE_MAX_BYTES = 32 * 1024 * 1024;
+const REFERENCE_EXTENSIONS = new Set([".webm", ".wav", ".mp4", ".m4a", ".ogg", ".opus"]);
 const state = {
   config: null,
+  personas: [],
+  selectedPersona: "",
+  creatingPersona: false,
+  activePersonaId: "",
   voices: [],
   selectedVoice: "",
   referenceBlob: null,
+  referenceFilename: "",
+  referenceObjectUrl: "",
+  referenceSource: "",
+  referenceMaxBytes: DEFAULT_REFERENCE_MAX_BYTES,
   referenceStream: null,
   recorder: null,
   recordStartedAt: 0,
@@ -26,6 +36,16 @@ const state = {
 function setMessage(text, isError = false) {
   $("enrollMessage").textContent = text;
   $("enrollMessage").className = isError ? "small error" : "small";
+}
+
+function referenceLimitLabel(bytes = state.referenceMaxBytes) {
+  const mebibyte = 1024 * 1024;
+  return bytes % mebibyte === 0 ? `${bytes / mebibyte} MiB` : `${bytes.toLocaleString()}바이트`;
+}
+
+function updateReferenceUploadLimit() {
+  const element = $("referenceUploadLimit");
+  if (element) element.textContent = `파일 크기 제한: ${referenceLimitLabel()} 이하`;
 }
 
 function setStatus(text, live = false) {
@@ -217,16 +237,90 @@ function sendControl(payload) {
   }
 }
 
-async function loadConfig() {
-  state.config = await api("/api/config");
-  $("personaSelect").innerHTML = "";
-  $("runtimeInfo").textContent = `${state.config.stt_mode} · ${state.config.tts_mode} · ${state.config.llm_model}`;
-  for (const persona of state.config.personas) {
+function setPersonaControlsDisabled(disabled) {
+  $("personaSelect").disabled = disabled;
+  $("createPersona").disabled = disabled || state.creatingPersona;
+  $("personaCreatePanel").classList.toggle("disabled", disabled);
+}
+
+function renderPersonas(preferredId = "") {
+  const select = $("personaSelect");
+  const current = preferredId || state.selectedPersona || state.config?.default_persona || state.personas[0]?.id || "";
+  select.innerHTML = "";
+  for (const persona of state.personas) {
     const option = document.createElement("option");
     option.value = persona.id;
     option.textContent = `${persona.name} · ${persona.identity}`;
-    option.selected = persona.id === state.config.default_persona;
-    $("personaSelect").appendChild(option);
+    option.selected = persona.id === current;
+    select.appendChild(option);
+  }
+  state.selectedPersona = state.personas.some((persona) => persona.id === current)
+    ? current
+    : (state.personas[0]?.id || "");
+  select.value = state.selectedPersona;
+}
+
+async function refreshPersonas(preferredId = "") {
+  state.personas = await api("/api/personas");
+  renderPersonas(preferredId);
+}
+
+async function loadConfig() {
+  state.config = await api("/api/config");
+  const configuredMax = Number(state.config.voice_max_upload_bytes);
+  state.referenceMaxBytes = Number.isSafeInteger(configuredMax) && configuredMax > 0
+    ? configuredMax
+    : DEFAULT_REFERENCE_MAX_BYTES;
+  updateReferenceUploadLimit();
+  $("runtimeInfo").textContent = `${state.config.stt_mode} · ${state.config.tts_mode} · ${state.config.llm_model}`;
+  await refreshPersonas(state.config.default_persona);
+}
+
+function linesToArray(id) {
+  return $(id).value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function setPersonaCreateMessage(text, isError = false) {
+  const element = $("personaCreateMessage");
+  element.textContent = text;
+  element.className = isError ? "small error" : "small";
+}
+
+async function submitPersona() {
+  if (state.creatingPersona || state.ws) return;
+  const name = $("personaName").value.trim();
+  const identity = $("personaIdentity").value.trim();
+  const relationship = $("personaRelationship").value.trim();
+  if (!name || !identity || !relationship) throw new Error("이름, 정체성, 관계를 모두 입력하세요.");
+  const maxSentences = Number($("personaMaxSentences").value);
+  if (!Number.isInteger(maxSentences) || maxSentences < 1 || maxSentences > 8) {
+    throw new Error("기본 문장 수는 1~8 사이여야 합니다.");
+  }
+  const payload = {
+    name,
+    identity,
+    relationship,
+    speaking_style: linesToArray("personaSpeakingStyle"),
+    behavior: linesToArray("personaBehavior"),
+    boundaries: linesToArray("personaBoundaries"),
+    backchannels: linesToArray("personaBackchannels"),
+    max_sentences: maxSentences,
+  };
+  const previousPersonaId = state.selectedPersona;
+  state.creatingPersona = true;
+  setPersonaControlsDisabled(true);
+  setPersonaCreateMessage("페르소나 저장 중…");
+  try {
+    const response = await api("/api/personas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    await refreshPersonas(previousPersonaId);
+    setPersonaCreateMessage(`생성 완료: ${response.persona?.name || name}. 기존 선택을 유지했습니다. 목록에서 새 페르소나를 직접 선택한 뒤 대화를 시작하세요.`);
+  } finally {
+    state.creatingPersona = false;
+    setPersonaControlsDisabled(Boolean(state.ws));
   }
 }
 
@@ -266,27 +360,123 @@ function selectVoice(id) {
   }
 }
 
-async function startReferenceRecording() {
+function referenceExtension(filename) {
+  const match = /\.([^.\\/]+)$/.exec(String(filename || ""));
+  return match ? `.${match[1].toLowerCase()}` : "";
+}
+
+function referenceExtensionForMime(mimeType) {
+  const mime = String(mimeType || "").toLowerCase().split(";", 1)[0];
+  const extensions = {
+    "audio/webm": ".webm",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/mp4": ".mp4",
+    "audio/m4a": ".m4a",
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+  };
+  return extensions[mime] || ".webm";
+}
+
+function stopReferenceStream() {
+  state.referenceStream?.getTracks().forEach((track) => track.stop());
+  state.referenceStream = null;
+}
+
+function clearReferenceSource() {
+  if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
   state.referenceBlob = null;
+  state.referenceFilename = "";
+  state.referenceObjectUrl = "";
+  state.referenceSource = "";
+  const preview = $("referencePreview");
+  preview.removeAttribute("src");
+  preview.load();
+  $("referenceSource").textContent = "";
+}
+
+function setReferenceAudio(file, source = "upload") {
+  if (!file || typeof file.size !== "number") throw new Error("기준 음성 파일을 읽을 수 없습니다.");
+  const filename = String(file.name || "").split(/[\\/]/).pop() || "reference.webm";
+  const extension = referenceExtension(filename);
+  if (!REFERENCE_EXTENSIONS.has(extension)) {
+    throw new Error("지원하지 않는 기준 음성 형식입니다. webm, wav, mp4, m4a, ogg, opus만 사용할 수 있습니다.");
+  }
+  if (file.size <= 0) throw new Error("빈 기준 음성 파일입니다.");
+  if (file.size > state.referenceMaxBytes) {
+    throw new Error(`기준 음성 파일은 ${referenceLimitLabel()} 이하이어야 합니다.`);
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
+  state.referenceBlob = file;
+  state.referenceFilename = filename;
+  state.referenceObjectUrl = objectUrl;
+  state.referenceSource = source;
+  $("referencePreview").src = objectUrl;
+  $("referenceSource").textContent = `${source === "recording" ? "녹음" : "파일 선택"}: ${filename} (${(file.size / 1024).toFixed(1)} KiB)`;
+}
+
+function setReferenceRecordingUi(recording) {
+  $("recordReference").disabled = recording;
+  $("stopReference").disabled = !recording;
+  $("referenceUpload").disabled = recording;
+}
+
+function handleReferenceUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    setReferenceAudio(file, "upload");
+    setMessage("기준 음성 파일을 선택했습니다. 대본을 실제 발화와 맞춘 뒤 등록하세요.");
+  } catch (error) {
+    event.target.value = "";
+    setMessage(error.message, true);
+  }
+}
+
+async function startReferenceRecording() {
+  if (state.recorder?.state === "recording") return;
+  stopReferenceStream();
   state.referenceStream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
   });
+  clearReferenceSource();
+  $("referenceUpload").value = "";
   const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
   const mimeType = mimeTypes.find((x) => MediaRecorder.isTypeSupported(x)) || "";
   const chunks = [];
-  state.recorder = new MediaRecorder(state.referenceStream, mimeType ? { mimeType } : undefined);
-  state.recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-  state.recorder.onstop = () => {
-    state.referenceBlob = new Blob(chunks, { type: state.recorder.mimeType || "audio/webm" });
-    $("referencePreview").src = URL.createObjectURL(state.referenceBlob);
-    state.referenceStream?.getTracks().forEach((track) => track.stop());
-    state.referenceStream = null;
+  let recorder;
+  try {
+    recorder = new MediaRecorder(state.referenceStream, mimeType ? { mimeType } : undefined);
+    recorder.start(200);
+  } catch (error) {
+    stopReferenceStream();
+    setReferenceRecordingUi(false);
+    throw error;
+  }
+  state.recorder = recorder;
+  recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    const filename = `reference${referenceExtensionForMime(recorder.mimeType || blob.type)}`;
+    const file = typeof File === "function"
+      ? new File([blob], filename, { type: blob.type || "audio/webm" })
+      : blob;
+    try {
+      setReferenceAudio(file, "recording");
+    } catch (error) {
+      setMessage(error.message, true);
+    }
+    stopReferenceStream();
+    state.recorder = null;
     clearInterval(state.recordTimer);
-    $("recordReference").disabled = false;
-    $("stopReference").disabled = true;
-    setMessage(`녹음 완료: ${(state.referenceBlob.size / 1024).toFixed(1)} KiB`);
+    state.recordTimer = null;
+    setReferenceRecordingUi(false);
+    if (state.referenceBlob) setMessage(`녹음 완료: ${state.referenceFilename} (${(state.referenceBlob.size / 1024).toFixed(1)} KiB)`);
   };
-  state.recorder.start(200);
   state.recordStartedAt = performance.now();
   state.recordTimer = setInterval(() => {
     const seconds = (performance.now() - state.recordStartedAt) / 1000;
@@ -294,8 +484,7 @@ async function startReferenceRecording() {
     const sec = (seconds % 60).toFixed(1).padStart(4, "0");
     $("recordTimer").textContent = `${min}:${sec}`;
   }, 100);
-  $("recordReference").disabled = true;
-  $("stopReference").disabled = false;
+  setReferenceRecordingUi(true);
   setMessage("녹음 중. 화면의 문장을 그대로 읽으세요.");
 }
 
@@ -304,14 +493,16 @@ function stopReferenceRecording() {
 }
 
 async function enrollVoice() {
-  if (!state.referenceBlob) throw new Error("먼저 기준 음성을 녹음하세요.");
+  if (!state.referenceBlob) throw new Error("먼저 기준 음성을 녹음하거나 파일 선택으로 추가하세요.");
   if (!$("consent").checked) throw new Error("본인 목소리 또는 허가받은 목소리라는 동의가 필요합니다.");
   const transcript = $("referenceText").value.trim();
-  if (!transcript) throw new Error("참조 대본이 비어 있습니다.");
+  if (transcript.length < 5 || transcript.length > 1000) throw new Error("참조 대본은 5~1000자여야 합니다.");
+  const displayName = $("voiceName").value.trim() || "내 목소리";
+  if (displayName.length > 80) throw new Error("프로필 이름은 80자 이하여야 합니다.");
   const form = new FormData();
-  form.append("audio", state.referenceBlob, "reference.webm");
+  form.append("audio", state.referenceBlob, state.referenceFilename || "reference.webm");
   form.append("transcript", transcript);
-  form.append("display_name", $("voiceName").value.trim() || "내 목소리");
+  form.append("display_name", displayName);
   form.append("consent", "true");
   setMessage("프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.");
   const profile = await api("/api/voices/enroll", { method: "POST", body: form });
@@ -410,11 +601,23 @@ async function stopMicCapture() {
 }
 
 async function startConversation() {
+  const personaId = state.selectedPersona || $("personaSelect").value;
+  if (!personaId || !state.personas.some((persona) => persona.id === personaId)) {
+    throw new Error("사용할 페르소나를 선택하세요.");
+  }
   const profileId = $("voiceSelect").value;
   if (!profileId && state.config.tts_mode !== "mock") throw new Error("사용할 목소리 프로필을 선택하세요.");
+  state.activePersonaId = personaId;
   await player.ensure();
+  setPersonaControlsDisabled(true);
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  state.ws = new WebSocket(`${protocol}//${location.host}/ws/conversation`);
+  try {
+    state.ws = new WebSocket(`${protocol}//${location.host}/ws/conversation`);
+  } catch (error) {
+    state.activePersonaId = "";
+    setPersonaControlsDisabled(false);
+    throw error;
+  }
   state.ws.binaryType = "arraybuffer";
 
   state.ws.onopen = async () => {
@@ -442,6 +645,8 @@ async function startConversation() {
     player.stopChannel(2);
     await stopMicCapture();
     state.ws = null;
+    state.activePersonaId = "";
+    setPersonaControlsDisabled(false);
     state.assistantPlaying = false;
     $("startConversation").disabled = false;
     $("stopConversation").disabled = true;
@@ -454,11 +659,13 @@ function handleServerMessage(message) {
     case "session.ready":
       sendControl({
         type: "session.configure",
-        persona_id: $("personaSelect").value,
+        persona_id: state.activePersonaId || state.selectedPersona,
         voice_profile_id: $("voiceSelect").value,
       });
       break;
     case "session.configured":
+      state.selectedPersona = message.persona || state.selectedPersona;
+      $("personaSelect").value = state.selectedPersona;
       appendBubble("system", `${message.persona_name} 페르소나와 목소리 프로필이 준비됐습니다.`);
       setStatus("듣는 중", true);
       break;
@@ -557,12 +764,27 @@ async function stopConversation() {
 function bindEvents() {
   $("recordReference").onclick = () => startReferenceRecording().catch((e) => setMessage(e.message, true));
   $("stopReference").onclick = stopReferenceRecording;
+  $("referenceUpload").onchange = handleReferenceUpload;
   $("enrollVoice").onclick = () => enrollVoice().catch((e) => setMessage(e.message, true));
   $("refreshVoices").onclick = () => refreshVoices().catch((e) => setMessage(e.message, true));
   $("voiceSelect").onchange = () => selectVoice($("voiceSelect").value);
+  $("personaSelect").onchange = () => {
+    if (state.ws) {
+      $("personaSelect").value = state.selectedPersona;
+      return;
+    }
+    state.selectedPersona = $("personaSelect").value;
+  };
+  $("createPersona").onclick = () => submitPersona().catch((e) => setPersonaCreateMessage(e.message, true));
   $("startConversation").onclick = () => startConversation().catch((e) => appendBubble("system", e.message));
   $("stopConversation").onclick = stopConversation;
-  window.addEventListener("beforeunload", () => state.ws?.close());
+  window.addEventListener("beforeunload", () => {
+    state.ws?.close();
+    try { state.recorder?.stop(); } catch (_) {}
+    stopReferenceStream();
+    if (state.recordTimer) clearInterval(state.recordTimer);
+    if (state.referenceObjectUrl) URL.revokeObjectURL(state.referenceObjectUrl);
+  });
 }
 
 (async function boot() {

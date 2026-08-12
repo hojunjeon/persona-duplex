@@ -47,6 +47,9 @@ class Settings:
     llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 
     persona_dir: Path = Path(os.getenv("PERSONA_DIR", "/app/personas"))
+    # Built-in personas live in the image and remain immutable. User-created
+    # personas are persisted in the separately mounted data directory.
+    persona_data_dir: Path = Path(os.getenv("PERSONA_DATA_DIR", "/data/personas"))
     default_persona: str = os.getenv("DEFAULT_PERSONA", "default")
     benchmark_dir: Path = Path(os.getenv("BENCHMARK_DIR", "/data/benchmark"))
 

@@ -40,6 +40,13 @@ _model_lock = threading.RLock()
 _prompt_cache: OrderedDict[str, Any] = OrderedDict()
 
 
+def _upload_limit_label(max_bytes: int) -> str:
+    mebibyte = 1024 * 1024
+    if max_bytes % mebibyte == 0:
+        return f"{max_bytes // mebibyte} MiB"
+    return f"{max_bytes}바이트"
+
+
 def _device_name() -> str:
     try:
         import torch
@@ -145,7 +152,10 @@ async def _store_upload(upload: UploadFile, target_dir: Path) -> Path:
                 break
             size += len(chunk)
             if size > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail="녹음 파일이 너무 큽니다.")
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"녹음 파일은 {_upload_limit_label(MAX_UPLOAD_BYTES)} 이하이어야 합니다.",
+                )
             out.write(chunk)
     if size == 0:
         raise HTTPException(status_code=400, detail="빈 녹음 파일입니다.")

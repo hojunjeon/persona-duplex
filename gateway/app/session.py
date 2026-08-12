@@ -48,7 +48,12 @@ class VoiceSession:
         self.stt = stt
         self.llm = llm
         self.tts = tts
-        self.persona: Persona = load_persona(settings.persona_dir, settings.default_persona)
+        self.persona: Persona = load_persona(
+            settings.persona_dir,
+            settings.default_persona,
+            settings.persona_data_dir,
+        )
+        self._persona_configured = False
         self.voice_profile_id = ""
         self.history: list[dict[str, str]] = []
 
@@ -127,10 +132,24 @@ class VoiceSession:
             await self.send_json({"type": "warning", "message": f"알 수 없는 제어 메시지: {event_type}"})
 
     async def _configure(self, event: dict[str, Any]) -> None:
+        if self._persona_configured:
+            await self.send_json(
+                {
+                    "type": "error",
+                    "source": "persona",
+                    "message": "대화 중에는 페르소나를 바꿀 수 없습니다.",
+                }
+            )
+            return
         persona_id = str(event.get("persona_id") or self.settings.default_persona)
         profile_id = str(event.get("voice_profile_id") or "").strip()
-        self.persona = load_persona(self.settings.persona_dir, persona_id)
+        self.persona = load_persona(
+            self.settings.persona_dir,
+            persona_id,
+            self.settings.persona_data_dir,
+        )
         self.voice_profile_id = profile_id
+        self._persona_configured = True
         await self.send_json(
             {
                 "type": "session.configured",
