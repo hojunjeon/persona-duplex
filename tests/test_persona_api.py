@@ -58,8 +58,13 @@ def test_persona_get_post_validation_duplicate_and_persistence(tmp_path: Path) -
             "id": "custom-reviewer",
             "name": "작업 도우미",
             "identity": "차분한 협력형 AI",
+            "relationship": "사용자의 검토 파트너",
             "source": "custom",
         }
+        assert any(
+            item["id"] == "custom-reviewer" and item["relationship"] == "사용자의 검토 파트너"
+            for item in created["personas"]
+        )
         assert any(item["id"] == "custom-reviewer" and item["source"] == "custom" for item in created["personas"])
         assert (tmp_path / "custom-reviewer.yaml").is_file()
 
@@ -93,6 +98,7 @@ def test_persona_create_accepts_basic_fields_only(tmp_path: Path) -> None:
     created = response.json()["persona"]
     assert created["name"] == "간단한 도우미"
     assert created["identity"] == "짧고 정확한 검토 도우미"
+    assert created["relationship"] == "사용자의 협력자"
     assert created["source"] == "custom"
     assert (tmp_path / f"{created['id']}.yaml").is_file()
 
@@ -154,6 +160,12 @@ def test_static_persona_create_contract() -> None:
     assert "현재 선택은 유지했습니다" in script
     assert "state.createdPersonaId" in script
     assert "selectPersona(state.createdPersonaId)" in script
+    assert "conversationControlsLocked" in script
+    assert "bindPersonaDetailsGuards" in script
+    assert "clearTransientConversationUi" in script
+    assert 'id="personaSummaryDescription"' in html
+    assert 'id="liveLabel" class="live-label offline">OFFLINE' in html
+    assert "if (details && !conversationControlsLocked()) details.open = true" in script
     assert "startConversation()" in script
     selection_logic = script.split("function selectPersona", 1)[1].split("async function submitPersona", 1)[0]
     assert "startConversation" not in selection_logic

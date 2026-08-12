@@ -85,6 +85,7 @@ class Persona:
             "id": self.persona_id,
             "name": self.name,
             "identity": self.identity,
+            "relationship": self.relationship,
             "source": self.source,
         }
 

@@ -36,8 +36,26 @@ const state = {
   assistantPlaying: false,
   currentAssistantTurn: null,
   assistantBubbles: new Map(),
+  partialBubble: null,
   metrics: { stt: null, llm: null, audio: null },
+  sessionState: "idle",
+  sessionReady: false,
+  micReady: false,
+  sessionConfigured: false,
+  startingConversation: false,
+  sessionTimerStartedAt: 0,
+  sessionTimerId: null,
 };
+
+const SESSION_STATE_UI = {
+  connecting: { status: "연결 중", label: "연결 중", hint: "마이크 권한과 서버 세션을 준비하고 있습니다.", timer: false },
+  idle: { status: "대기 중", label: "대화 준비", hint: "마이크와 연결을 확인한 뒤 시작하세요", timer: false },
+  listening: { status: "듣는 중", label: "듣는 중", hint: "말씀해 주세요. 짧은 추임새는 응답을 낮춥니다.", timer: true },
+  thinking: { status: "생각 중", label: "생각 중", hint: "페르소나가 답변을 준비하고 있습니다.", timer: true },
+  speaking: { status: "말하는 중", label: "말하는 중", hint: "언제든 말해 대화를 끼어들 수 있습니다.", timer: true },
+};
+
+const SESSION_STATE_CLASSES = ["state-connecting", "state-idle", "state-listening", "state-thinking", "state-speaking"];
 
 function setMessage(text, isError = false) {
   $("enrollMessage").textContent = text;
@@ -54,19 +72,148 @@ function updateReferenceUploadLimit() {
   if (element) element.textContent = `파일 크기 제한: ${referenceLimitLabel()} 이하`;
 }
 
-function setStatus(text, live = false) {
-  $("statusText").textContent = text;
-  $("statusDot").classList.toggle("live", live);
+function updateSessionTimer() {
+  const element = $("sessionTimerText");
+  if (!element) return;
+  if (!state.sessionTimerStartedAt) {
+    element.textContent = "진행 준비";
+    return;
+  }
+  const elapsed = Math.max(0, Math.floor((performance.now() - state.sessionTimerStartedAt) / 1000));
+  const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const seconds = String(elapsed % 60).padStart(2, "0");
+  element.textContent = `${minutes}:${seconds}`;
+}
+
+function startSessionTimer() {
+  if (!state.sessionTimerStartedAt) state.sessionTimerStartedAt = performance.now();
+  updateSessionTimer();
+  if (!state.sessionTimerId) state.sessionTimerId = setInterval(updateSessionTimer, 1000);
+}
+
+function stopSessionTimer() {
+  if (state.sessionTimerId) clearInterval(state.sessionTimerId);
+  state.sessionTimerId = null;
+  state.sessionTimerStartedAt = 0;
+  updateSessionTimer();
+}
+
+function setStageState(stateName, live) {
+  const normalized = SESSION_STATE_UI[stateName] ? stateName : "idle";
+  const elements = [$("audioOrb"), $("listeningPill")].filter(Boolean);
+  for (const element of elements) {
+    SESSION_STATE_CLASSES.forEach((className) => element.classList.remove(className));
+    element.classList.add(`state-${normalized}`);
+    element.dataset.state = normalized;
+  }
+  const liveLabel = $("liveLabel");
+  if (liveLabel) {
+    liveLabel.textContent = live ? "LIVE" : "OFFLINE";
+    liveLabel.classList.toggle("offline", !live);
+  }
+}
+
+function setStatus(text, live = false, stateName = null) {
+  const statusText = $("statusText");
+  const statusDot = $("statusDot");
+  if (statusText) statusText.textContent = text;
+  if (statusDot) statusDot.classList.toggle("live", live);
+  if (stateName) {
+    const ui = SESSION_STATE_UI[stateName] || SESSION_STATE_UI.idle;
+    const normalized = SESSION_STATE_UI[stateName] ? stateName : "idle";
+    state.sessionState = normalized;
+    const label = $("sessionStateLabel");
+    const hint = $("sessionStateHint");
+    if (label) label.textContent = ui.label;
+    if (hint) hint.textContent = ui.hint;
+    setStageState(normalized, live);
+    if (ui.timer) startSessionTimer();
+    else stopSessionTimer();
+  }
+}
+
+function setSessionState(stateName, { live = Boolean(state.ws), status = null } = {}) {
+  const ui = SESSION_STATE_UI[stateName] || SESSION_STATE_UI.idle;
+  setStatus(status || ui.status, live, SESSION_STATE_UI[stateName] ? stateName : "idle");
 }
 
 function appendBubble(role, text, id = null) {
   const bubble = document.createElement("div");
   bubble.className = `bubble ${role}`;
-  bubble.textContent = text;
+  bubble.textContent = text == null ? "" : String(text);
   if (id) bubble.dataset.turnId = id;
   $("chatLog").appendChild(bubble);
   $("chatLog").scrollTop = $("chatLog").scrollHeight;
   return bubble;
+}
+
+function updateVoiceSummary(profile = null) {
+  const name = $("voiceSummaryName");
+  const meta = $("voiceSummaryMeta");
+  const verified = $("voiceSummaryVerified");
+  if (!profile) {
+    if (name) name.textContent = "선택 안 됨";
+    if (meta) meta.textContent = state.voices.length ? "목소리 프로필을 선택하세요" : "등록된 음성 프로필 없음";
+    if (verified) verified.hidden = true;
+    return;
+  }
+  const profileId = String(profile.profile_id || "");
+  const displayName = String(profile.display_name || profileId || "이름 없는 프로필");
+  const seconds = Number(profile.seconds);
+  if (name) name.textContent = displayName;
+  if (meta) {
+    const duration = Number.isFinite(seconds) && seconds > 0 ? `${seconds.toFixed(1)}초 · ` : "";
+    meta.textContent = `${duration}${profileId}`;
+  }
+  if (verified) verified.hidden = false;
+}
+
+function updatePersonaSummary(persona = null) {
+  const name = $("personaSummaryName");
+  const description = $("personaSummaryDescription");
+  if (!persona) {
+    if (name) name.textContent = "선택 안 됨";
+    if (description) description.textContent = "페르소나를 선택하면 대화 대상이 여기에 표시됩니다.";
+    return;
+  }
+  if (name) name.textContent = String(persona.name || persona.id || "이름 없는 페르소나");
+  const identity = String(persona.identity || "").trim();
+  const relationship = String(persona.relationship || "").trim();
+  const summary = [identity, relationship].filter(Boolean).join(" · ");
+  if (description) description.textContent = summary || "설명 없는 페르소나";
+}
+
+function setActiveNav(hash = "") {
+  const requested = hash && hash.startsWith("#") ? hash : "#live";
+  const items = document.querySelectorAll(".nav-item");
+  let matched = false;
+  items.forEach((item) => {
+    const active = item.getAttribute("href") === requested;
+    item.classList.toggle("active", active);
+    if (active) {
+      item.setAttribute("aria-current", "page");
+      matched = true;
+    } else {
+      item.removeAttribute("aria-current");
+    }
+  });
+  if (!matched && requested !== "#live") setActiveNav("#live");
+}
+
+function bindNavigation() {
+  const items = document.querySelectorAll(".nav-item");
+  items.forEach((item) => {
+    item.addEventListener("click", () => {
+      const href = item.getAttribute("href") || "#live";
+      let target = null;
+      try { target = document.querySelector(href); } catch (_) {}
+      const details = target?.closest("details");
+      if (details && !conversationControlsLocked()) details.open = true;
+      setActiveNav(href);
+    });
+  });
+  window.addEventListener("hashchange", () => setActiveNav(location.hash));
+  setActiveNav(location.hash || "#live");
 }
 
 async function api(path, options = {}) {
@@ -243,11 +390,67 @@ function sendControl(payload) {
   }
 }
 
+function conversationControlsLocked() {
+  return Boolean(state.ws || state.startingConversation);
+}
+
 function setPersonaControlsDisabled(disabled) {
-  $("personaSelect").disabled = disabled;
-  $("createPersona").disabled = disabled || state.creatingPersona;
-  $("selectCreatedPersona").disabled = disabled || !state.createdPersonaId;
-  $("personaCreatePanel").classList.toggle("disabled", disabled);
+  const ids = [
+    "personaSelect", "personaName", "personaIdentity", "personaRelationship",
+    "personaMaxSentences", "personaSpeakingStyle", "personaBehavior",
+    "personaBoundaries", "personaBackchannels", "createPersona", "selectCreatedPersona",
+  ];
+  ids.forEach((id) => {
+    const element = $(id);
+    if (element) element.disabled = disabled || (id === "createPersona" && state.creatingPersona)
+      || (id === "selectCreatedPersona" && !state.createdPersonaId);
+  });
+  const panel = $("personaCreatePanel");
+  if (panel) {
+    panel.classList.toggle("disabled", disabled);
+    panel.dataset.disabled = String(disabled);
+    panel.setAttribute("aria-disabled", String(disabled));
+    panel.querySelector("summary")?.setAttribute("aria-disabled", String(disabled));
+  }
+  const advanced = $("personaAdvancedPanel");
+  if (advanced) {
+    advanced.classList.toggle("disabled", disabled);
+    advanced.dataset.disabled = String(disabled);
+    advanced.setAttribute("aria-disabled", String(disabled));
+    advanced.querySelector("summary")?.setAttribute("aria-disabled", String(disabled));
+  }
+}
+
+function setVoiceControlsDisabled(disabled) {
+  const ids = [
+    "voiceSelect", "refreshVoices", "recordReference", "stopReference", "referenceUpload",
+    "enrollRecordedVoice", "enrollUploadedVoice", "voiceName", "referenceText", "consent",
+  ];
+  ids.forEach((id) => {
+    const element = $(id);
+    if (!element) return;
+    const sourceBusy = (id === "referenceUpload" || id === "enrollUploadedVoice") && state.uploadSubmitting;
+    const recordingBusy = ["recordReference", "stopReference", "enrollRecordedVoice"].includes(id) && state.recordingSubmitting;
+    element.disabled = disabled || sourceBusy || recordingBusy;
+  });
+  document.querySelectorAll(".voice-card").forEach((card) => {
+    const busy = state.voiceMutations.has(card.dataset.profileId);
+    card.querySelectorAll("button").forEach((button) => { button.disabled = disabled || busy; });
+  });
+}
+
+function bindPersonaDetailsGuards() {
+  [$("personaCreatePanel"), $("personaAdvancedPanel")].forEach((details) => {
+    const summary = details?.querySelector("summary");
+    if (!summary) return;
+    const blockWhileActive = (event) => {
+      if (!conversationControlsLocked() && details.dataset.disabled !== "true") return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    summary.addEventListener("click", blockWhileActive);
+    summary.addEventListener("keydown", blockWhileActive);
+  });
 }
 
 function renderPersonas(preferredId = "") {
@@ -265,6 +468,7 @@ function renderPersonas(preferredId = "") {
     ? current
     : (state.personas[0]?.id || "");
   select.value = state.selectedPersona;
+  updatePersonaSummary(state.personas.find((persona) => persona.id === state.selectedPersona) || null);
 }
 
 async function refreshPersonas(preferredId = "") {
@@ -279,7 +483,9 @@ async function loadConfig() {
     ? configuredMax
     : DEFAULT_REFERENCE_MAX_BYTES;
   updateReferenceUploadLimit();
-  $("runtimeInfo").textContent = `${state.config.stt_mode} · ${state.config.tts_mode} · ${state.config.llm_model}`;
+  const runtimeText = `${state.config.stt_mode} · ${state.config.tts_mode} · ${state.config.llm_model}`;
+  $("runtimeInfo").textContent = runtimeText;
+  if ($("settingsRuntime")) $("settingsRuntime").textContent = `현재 런타임: ${runtimeText}`;
   await refreshPersonas(state.config.default_persona);
 }
 
@@ -294,11 +500,12 @@ function setPersonaCreateMessage(text, isError = false) {
 }
 
 function selectPersona(id) {
-  if (state.ws) return;
+  if (conversationControlsLocked()) return;
   const persona = state.personas.find((item) => item.id === id);
   if (!persona) throw new Error("선택할 페르소나를 찾지 못했습니다. 목록을 새로고침하세요.");
   state.selectedPersona = persona.id;
   $("personaSelect").value = persona.id;
+  updatePersonaSummary(persona);
   if (state.createdPersonaId === persona.id) {
     state.createdPersonaId = "";
     $("selectCreatedPersona").hidden = true;
@@ -308,7 +515,7 @@ function selectPersona(id) {
 }
 
 async function submitPersona() {
-  if (state.creatingPersona || state.ws) return;
+  if (state.creatingPersona || conversationControlsLocked()) return;
   const name = $("personaName").value.trim();
   const identity = $("personaIdentity").value.trim();
   const relationship = $("personaRelationship").value.trim();
@@ -351,6 +558,7 @@ async function submitPersona() {
 }
 
 async function refreshVoices(selectId = null) {
+  if (state.ws) throw new Error("대화 중에는 목소리 목록을 관리할 수 없습니다.");
   state.voices = await api("/api/voices");
   $("voiceList").innerHTML = "";
   $("voiceSelect").innerHTML = "";
@@ -378,7 +586,7 @@ async function refreshVoices(selectId = null) {
     deleteButton.textContent = "삭제";
     deleteButton.className = "danger";
     deleteButton.onclick = () => deleteVoice(id).catch((error) => setMessage(error.message, true));
-    const mutationDisabled = state.voiceMutations.has(id);
+    const mutationDisabled = state.voiceMutations.has(id) || Boolean(state.ws);
     useButton.disabled = mutationDisabled;
     editButton.disabled = mutationDisabled;
     deleteButton.disabled = mutationDisabled;
@@ -394,6 +602,12 @@ async function refreshVoices(selectId = null) {
     option.textContent = voice.display_name || id;
     $("voiceSelect").appendChild(option);
   }
+  if (!state.voices.length) {
+    const empty = document.createElement("p");
+    empty.className = "small voice-empty";
+    empty.textContent = "등록된 목소리 프로필이 없습니다. 기준 음성을 녹음하거나 파일로 등록하세요.";
+    $("voiceList").appendChild(empty);
+  }
   const preferred = selectId || state.selectedVoice || "";
   const target = state.voices.some((voice) => voice.profile_id === preferred)
     ? preferred
@@ -402,11 +616,17 @@ async function refreshVoices(selectId = null) {
 }
 
 function selectVoice(id) {
+  if (state.ws && id !== state.selectedVoice) {
+    setMessage("대화 중에는 목소리 프로필을 바꿀 수 없습니다.", true);
+    $("voiceSelect").value = state.selectedVoice;
+    return;
+  }
   state.selectedVoice = id || "";
   $("voiceSelect").value = state.selectedVoice;
   for (const card of $("voiceList").children) {
     card.classList.toggle("selected", card.dataset.profileId === state.selectedVoice);
   }
+  updateVoiceSummary(state.voices.find((voice) => voice.profile_id === state.selectedVoice) || null);
 }
 
 function setVoiceCardMutationUi(id, disabled) {
@@ -560,12 +780,17 @@ function setReferenceAudio(file, source = "upload") {
 
 function setReferenceRecordingUi(recording) {
   const active = recording || state.recorder?.state === "recording";
-  $("recordReference").disabled = active || state.recordingSubmitting;
-  $("stopReference").disabled = !active;
-  $("enrollRecordedVoice").disabled = active || state.recordingSubmitting || !state.recordingFile;
+  $("recordReference").disabled = Boolean(state.ws) || active || state.recordingSubmitting;
+  $("stopReference").disabled = Boolean(state.ws) || !active;
+  $("enrollRecordedVoice").disabled = Boolean(state.ws) || active || state.recordingSubmitting || !state.recordingFile;
 }
 
 function handleReferenceUpload(event) {
+  if (state.ws) {
+    event.target.value = "";
+    setSourceMessage("upload", "대화 중에는 기준 음성을 등록할 수 없습니다.", true);
+    return;
+  }
   const file = event.target.files?.[0];
   if (!file) return;
   try {
@@ -581,6 +806,7 @@ function handleReferenceUpload(event) {
 }
 
 async function startReferenceRecording() {
+  if (state.ws) throw new Error("대화 중에는 기준 음성을 등록할 수 없습니다.");
   if (state.recordingSubmitting) throw new Error("녹음 등록이 끝날 때까지 새 녹음을 시작할 수 없습니다.");
   if (state.recorder?.state === "recording") return;
   stopReferenceStream();
@@ -640,15 +866,17 @@ function stopReferenceRecording() {
 
 function setVoiceSubmitUi(source, submitting) {
   const config = VOICE_SOURCE_CONFIG[source];
-  $(config.submitId).disabled = submitting || !state[config.fileKey]
+  const sourceSubmitting = Boolean(state[`${source}Submitting`]);
+  $(config.submitId).disabled = Boolean(state.ws) || submitting || sourceSubmitting || !state[config.fileKey]
     || (source === "recording" && state.recorder?.state === "recording");
-  if (source === "upload") $("referenceUpload").disabled = submitting;
+  if (source === "upload") $("referenceUpload").disabled = submitting || sourceSubmitting || Boolean(state.ws);
   $(config.submitId).textContent = submitting
     ? `${config.label} 등록 중…`
     : `${config.label}으로 프로필 생성`;
 }
 
 async function enrollVoice(source) {
+  if (state.ws) throw new Error("대화 중에는 목소리 프로필을 등록할 수 없습니다.");
   const config = VOICE_SOURCE_CONFIG[source];
   if (!config) throw new Error("알 수 없는 목소리 등록 방식입니다.");
   if (state[`${source}Submitting`]) return;
@@ -716,6 +944,13 @@ async function startMicCapture() {
 }
 
 function processMicPacket(pcm, rms) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.micNode) {
+    state.speechActive = false;
+    state.aboveFrames = 0;
+    state.belowFrames = 0;
+    state.noiseFloor = 0.006;
+    return;
+  }
   $("micMeter").style.width = `${Math.min(100, rms * 900)}%`;
   if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(pcm);
 
@@ -764,103 +999,208 @@ async function stopMicCapture() {
   }
   try { state.micNode?.disconnect(); } catch (_) {}
   try { state.micSource?.disconnect(); } catch (_) {}
-  state.micStream?.getTracks().forEach((track) => track.stop());
-  if (state.micContext) await state.micContext.close();
+  try { state.micStream?.getTracks().forEach((track) => track.stop()); } catch (_) {}
+  try { if (state.micContext) await state.micContext.close(); } catch (_) {}
   state.micStream = null;
   state.micContext = null;
   state.micNode = null;
   state.micSource = null;
+  state.micReady = false;
+  state.speechActive = false;
+  state.aboveFrames = 0;
+  state.belowFrames = 0;
+  state.noiseFloor = 0.006;
   $("micMeter").style.width = "0%";
 }
 
+function clearTransientConversationUi() {
+  if (state.partialBubble) {
+    state.partialBubble.remove();
+    state.partialBubble = null;
+  }
+  for (const bubble of state.assistantBubbles.values()) bubble.remove();
+  state.assistantBubbles.clear();
+  state.currentAssistantTurn = null;
+  $("liveTranscript").textContent = "인식 대기";
+}
+
 async function startConversation() {
+  if (conversationControlsLocked()) {
+    throw new Error("대화 연결이 이미 진행 중입니다.");
+  }
   const personaId = state.selectedPersona || $("personaSelect").value;
   if (!personaId || !state.personas.some((persona) => persona.id === personaId)) {
     throw new Error("사용할 페르소나를 선택하세요.");
   }
-  const profileId = $("voiceSelect").value;
+  const profileId = state.selectedVoice || $("voiceSelect").value;
   if (!profileId) throw new Error("사용할 목소리 프로필을 선택하세요.");
+  if (!state.voices.some((voice) => voice.profile_id === profileId)) {
+    throw new Error("선택한 목소리 프로필을 찾지 못했습니다. 목록을 새로고침하세요.");
+  }
+  state.metrics = { stt: null, llm: null, audio: null };
+  updateMetrics();
+  clearTransientConversationUi();
+  state.sessionReady = false;
+  state.micReady = false;
+  state.sessionConfigured = false;
+  state.startingConversation = true;
   state.activePersonaId = personaId;
-  await player.ensure();
   setPersonaControlsDisabled(true);
+  setVoiceControlsDisabled(true);
+  $("startConversation").disabled = true;
+  setSessionState("connecting", { live: true });
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  let socket = null;
   try {
-    state.ws = new WebSocket(`${protocol}//${location.host}/ws/conversation`);
+    await player.ensure();
+    if (!state.startingConversation) return;
+    socket = new WebSocket(`${protocol}//${location.host}/ws/conversation`);
+    state.ws = socket;
   } catch (error) {
+    state.startingConversation = false;
     state.activePersonaId = "";
     setPersonaControlsDisabled(false);
+    setVoiceControlsDisabled(false);
+    setReferenceRecordingUi(false);
+    setVoiceSubmitUi("recording", false);
+    setVoiceSubmitUi("upload", false);
+    $("startConversation").disabled = false;
+    $("stopConversation").disabled = true;
+    setSessionState("idle", { live: false, status: "정지" });
     throw error;
   }
-  state.ws.binaryType = "arraybuffer";
+  socket.binaryType = "arraybuffer";
 
-  state.ws.onopen = async () => {
+  socket.onopen = async () => {
     try {
       await startMicCapture();
-      $("startConversation").disabled = true;
+      if (state.ws !== socket || socket.readyState !== WebSocket.OPEN || !state.startingConversation) {
+        await stopMicCapture();
+        return;
+      }
+      state.micReady = true;
       $("stopConversation").disabled = false;
-      setStatus("연결 중", true);
+      maybeConfigureSession();
     } catch (error) {
       appendBubble("system", `마이크 시작 실패: ${error.message}`);
-      state.ws.close();
+      socket.close();
     }
   };
-  state.ws.onmessage = async (event) => {
+  socket.onmessage = async (event) => {
     if (event.data instanceof ArrayBuffer) {
       await player.addFrame(event.data);
       return;
     }
-    const message = JSON.parse(event.data);
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch (_) {
+      appendBubble("system", "서버 이벤트를 읽지 못했습니다.");
+      return;
+    }
+    if (!message || typeof message.type !== "string") {
+      appendBubble("system", "형식이 올바르지 않은 서버 이벤트를 무시했습니다.");
+      return;
+    }
     handleServerMessage(message);
   };
-  state.ws.onerror = () => appendBubble("system", "WebSocket 연결 오류가 발생했습니다.");
-  state.ws.onclose = async () => {
+  socket.onerror = () => {
+    appendBubble("system", "WebSocket 연결 오류가 발생했습니다.");
+    try { if (socket.readyState !== WebSocket.CLOSED) socket.close(); } catch (_) {}
+  };
+  socket.onclose = async () => {
     player.stopChannel(1);
     player.stopChannel(2);
     await stopMicCapture();
+    clearTransientConversationUi();
     state.ws = null;
     state.activePersonaId = "";
+    state.sessionReady = false;
+    state.micReady = false;
+    state.sessionConfigured = false;
+    state.startingConversation = false;
     setPersonaControlsDisabled(false);
+    setVoiceControlsDisabled(false);
+    setReferenceRecordingUi(false);
+    setVoiceSubmitUi("recording", false);
+    setVoiceSubmitUi("upload", false);
     state.assistantPlaying = false;
     $("startConversation").disabled = false;
     $("stopConversation").disabled = true;
-    setStatus("정지", false);
+    setSessionState("idle", { live: false, status: "정지" });
   };
+}
+
+function maybeConfigureSession() {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.sessionReady || !state.micReady || state.sessionConfigured) return;
+  state.sessionConfigured = true;
+  sendControl({
+    type: "session.configure",
+    persona_id: state.activePersonaId || state.selectedPersona,
+    voice_profile_id: state.selectedVoice || $("voiceSelect").value,
+  });
 }
 
 function handleServerMessage(message) {
   switch (message.type) {
     case "session.ready":
-      sendControl({
-        type: "session.configure",
-        persona_id: state.activePersonaId || state.selectedPersona,
-        voice_profile_id: $("voiceSelect").value,
-      });
+      state.sessionReady = true;
+      setSessionState("connecting", { live: true });
+      maybeConfigureSession();
       break;
     case "session.configured":
       state.selectedPersona = message.persona || state.selectedPersona;
       $("personaSelect").value = state.selectedPersona;
-      appendBubble("system", `${message.persona_name} 페르소나와 목소리 프로필이 준비됐습니다.`);
-      setStatus("듣는 중", true);
+      state.sessionConfigured = true;
+      const configuredPersona = state.personas.find((persona) => persona.id === state.selectedPersona);
+      updatePersonaSummary(configuredPersona || {
+        id: state.selectedPersona,
+        name: message.persona_name,
+      });
+      if (message.voice_profile_id) {
+        state.selectedVoice = String(message.voice_profile_id);
+        $("voiceSelect").value = state.selectedVoice;
+        updateVoiceSummary(state.voices.find((voice) => voice.profile_id === state.selectedVoice) || null);
+      }
+      appendBubble("system", `${message.persona_name || state.selectedPersona} 페르소나와 목소리 프로필이 준비됐습니다.`);
+      setSessionState("listening", { live: true });
       break;
     case "session.state": {
-      const labels = { idle: "듣는 중", listening: "말을 듣는 중", thinking: "생각 중", speaking: "말하는 중" };
-      setStatus(labels[message.state] || message.state, true);
+      const stateName = String(message.state || "idle");
       state.assistantPlaying = Boolean(message.assistant_playing) || player.hasMainAudio();
+      setSessionState(stateName, { live: Boolean(state.ws), status: SESSION_STATE_UI[stateName]?.status || stateName });
       break;
     }
     case "transcript.partial":
-      $("liveTranscript").textContent = message.text || "인식 중";
+      {
+        const text = String(message.text || "").trim();
+        $("liveTranscript").textContent = text || "인식 중";
+        if (!state.partialBubble) state.partialBubble = appendBubble("user", "");
+        state.partialBubble.classList.add("partial");
+        state.partialBubble.textContent = text || "인식 중";
+        $("chatLog").scrollTop = $("chatLog").scrollHeight;
+      }
       break;
     case "transcript.final":
+      if (state.partialBubble) {
+        state.partialBubble.remove();
+        state.partialBubble = null;
+      }
       $("liveTranscript").textContent = "인식 대기";
-      appendBubble("user", message.text);
+      if (String(message.text || "").trim()) appendBubble("user", message.text);
       break;
     case "transcript.empty":
+      if (state.partialBubble) {
+        state.partialBubble.remove();
+        state.partialBubble = null;
+      }
       $("liveTranscript").textContent = "음성을 인식하지 못했습니다.";
+      appendBubble("system", "음성을 인식하지 못했습니다.");
       break;
     case "assistant.turn_start": {
       state.currentAssistantTurn = message.turn_id;
       player.beginGeneration(message.turn_id);
+      setSessionState("thinking", { live: true });
       const bubble = appendBubble("assistant", "", message.turn_id);
       state.assistantBubbles.set(message.turn_id, bubble);
       break;
@@ -868,14 +1208,23 @@ function handleServerMessage(message) {
     case "assistant.delta": {
       const bubble = state.assistantBubbles.get(message.turn_id);
       if (bubble) {
-        bubble.textContent += message.text;
+        bubble.textContent += String(message.text || "");
         $("chatLog").scrollTop = $("chatLog").scrollHeight;
       }
       break;
     }
+    case "assistant.text_done": {
+      const text = String(message.text || "");
+      const bubble = state.assistantBubbles.get(message.turn_id);
+      if (bubble && !bubble.textContent.trim()) bubble.textContent = text;
+      break;
+    }
     case "audio.begin":
       player.beginStream(message.stream_id, message.channel);
-      if (message.channel === 1) state.assistantPlaying = true;
+      if (Number(message.channel) === 1) {
+        state.assistantPlaying = true;
+        setSessionState("speaking", { live: true });
+      }
       break;
     case "audio.end":
       player.endStream(message.stream_id);
@@ -896,6 +1245,18 @@ function handleServerMessage(message) {
     case "assistant.interrupted":
       appendBubble("system", "사용자 발화로 이전 답변을 중단했습니다.");
       break;
+    case "assistant.committed": {
+      const bubble = state.assistantBubbles.get(message.turn_id);
+      const spokenText = String(message.spoken_text || "").trim();
+      if (bubble) {
+        if (spokenText) bubble.textContent = spokenText;
+        else if (message.interrupted) bubble.remove();
+        bubble.classList.toggle("interrupted", Boolean(message.interrupted));
+      }
+      state.assistantBubbles.delete(message.turn_id);
+      if (state.currentAssistantTurn === message.turn_id) state.currentAssistantTurn = null;
+      break;
+    }
     case "user.backchannel":
       player.unduck(90);
       break;
@@ -912,10 +1273,10 @@ function handleServerMessage(message) {
       updateMetrics();
       break;
     case "warning":
-      appendBubble("system", `경고: ${message.message}`);
+      appendBubble("system", `경고: ${String(message.message || "알 수 없는 경고")}`);
       break;
     case "error":
-      appendBubble("system", `오류[${message.source || "server"}]: ${message.message}`);
+      appendBubble("system", `오류[${message.source || "server"}]: ${String(message.message || "알 수 없는 오류")}`);
       break;
     default:
       break;
@@ -923,18 +1284,37 @@ function handleServerMessage(message) {
 }
 
 function updateMetrics() {
-  const fmt = (value) => value == null ? "-" : `${Math.round(value)} ms`;
+  const fmt = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${Math.round(numeric)} ms` : "-";
+  };
   $("metricStt").textContent = fmt(state.metrics.stt);
   $("metricLlm").textContent = fmt(state.metrics.llm);
   $("metricAudio").textContent = fmt(state.metrics.audio);
 }
 
 async function stopConversation() {
+  if (state.startingConversation && !state.ws) {
+    state.startingConversation = false;
+    state.activePersonaId = "";
+    setPersonaControlsDisabled(false);
+    setVoiceControlsDisabled(false);
+    setReferenceRecordingUi(false);
+    setVoiceSubmitUi("recording", false);
+    setVoiceSubmitUi("upload", false);
+    $("startConversation").disabled = false;
+    $("stopConversation").disabled = true;
+    setSessionState("idle", { live: false, status: "정지" });
+    return;
+  }
   sendControl({ type: "client.stop" });
   if (state.ws) state.ws.close(1000, "user stopped");
+  else setSessionState("idle", { live: false, status: "정지" });
 }
 
 function bindEvents() {
+  bindNavigation();
+  bindPersonaDetailsGuards();
   $("recordReference").onclick = () => startReferenceRecording().catch((e) => setMessage(e.message, true));
   $("stopReference").onclick = stopReferenceRecording;
   $("referenceUpload").onchange = handleReferenceUpload;
@@ -949,11 +1329,12 @@ function bindEvents() {
   $("refreshVoices").onclick = () => refreshVoices().catch((e) => setMessage(e.message, true));
   $("voiceSelect").onchange = () => selectVoice($("voiceSelect").value);
   $("personaSelect").onchange = () => {
-    if (state.ws) {
+    if (conversationControlsLocked()) {
       $("personaSelect").value = state.selectedPersona;
       return;
     }
     state.selectedPersona = $("personaSelect").value;
+    updatePersonaSummary(state.personas.find((persona) => persona.id === state.selectedPersona) || null);
   };
   $("createPersona").onclick = () => submitPersona().catch((e) => setPersonaCreateMessage(e.message, true));
   $("selectCreatedPersona").onclick = () => {
@@ -967,6 +1348,7 @@ function bindEvents() {
   $("stopConversation").onclick = stopConversation;
   window.addEventListener("beforeunload", () => {
     state.ws?.close();
+    stopSessionTimer();
     try { state.recorder?.stop(); } catch (_) {}
     stopReferenceStream();
     if (state.recordTimer) clearInterval(state.recordTimer);

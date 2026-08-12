@@ -40,9 +40,9 @@
         <div class="voice-summary-row">
           <div class="avatar-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
           <div>
-            <div class="summary-name">내 목소리 <span class="verified">✓</span></div>
+            <div class="summary-name"><span id="voiceSummaryName">선택 안 됨</span> <span id="voiceSummaryVerified" class="verified" hidden>✓</span></div>
             <div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <span class="summary-meta">등록된 음성 프로필</span>
+            <span id="voiceSummaryMeta" class="summary-meta">등록된 음성 프로필 없음</span>
           </div>
         </div>
         <label class="sr-only" for="voiceSelect">대화에 사용할 목소리</label>
@@ -55,8 +55,8 @@
         <div class="persona-summary-row">
           <div class="persona-orb-small" aria-hidden="true"></div>
           <div>
-            <div class="summary-name">노드</div>
-            <p>차분하고 정확한<br />설계 검토자</p>
+            <div id="personaSummaryName" class="summary-name">선택 안 됨</div>
+            <p id="personaSummaryDescription">페르소나를 선택하면 대화 대상이 여기에 표시됩니다.</p>
           </div>
           <span class="chevron" aria-hidden="true">⌄</span>
         </div>
@@ -90,17 +90,17 @@
               <span class="section-kicker">Live voice session</span>
               <h2 id="conversation-title">페르소나와 대화</h2>
             </div>
-            <div class="session-timer"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>진행 준비</div>
+            <div id="sessionTimer" class="session-timer"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg><span id="sessionTimerText">진행 준비</span></div>
           </div>
 
-          <div class="live-stage">
+           <div id="liveStage" class="live-stage">
             <div class="orb-halo halo-one"></div>
             <div class="orb-halo halo-two"></div>
-            <div class="audio-orb" aria-label="음성 대화 상태 시각화">
+             <div id="audioOrb" class="audio-orb state-idle" data-state="idle" aria-label="음성 대화 상태 시각화">
               <span class="orb-ring ring-a"></span><span class="orb-ring ring-b"></span><span class="orb-ring ring-c"></span>
               <div class="orb-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
-            <div class="listening-pill"><span class="listening-icon">⌁</span><strong>대화 준비</strong><span>마이크와 연결을 확인한 뒤 시작하세요</span></div>
+             <div id="listeningPill" class="listening-pill state-idle"><span class="listening-icon">⌁</span><strong id="sessionStateLabel">대화 준비</strong><span id="sessionStateHint">마이크와 연결을 확인한 뒤 시작하세요</span></div>
           </div>
 
           <div id="chatLog" class="conversation-log" aria-live="polite">
@@ -122,8 +122,8 @@
         </section>
 
         <aside class="insights-panel" aria-label="실시간 세션 신호">
-          <section class="insight-section">
-            <div class="insights-header"><h2>세션 신호</h2><span class="live-label">LIVE</span></div>
+           <section class="insight-section">
+            <div class="insights-header"><h2>세션 신호</h2><span id="liveLabel" class="live-label offline">OFFLINE</span></div>
             <div class="metric-grid">
               <article class="metric-card"><span>STT 확정</span><strong id="metricStt">-</strong><i class="metric-wave mint"></i></article>
               <article class="metric-card"><span>LLM 첫 토큰</span><strong id="metricLlm">-</strong><i class="metric-wave blue"></i></article>
@@ -227,6 +227,13 @@
               </div>
             </details>
             <div class="actions persona-actions"><button id="createPersona" class="primary" type="button">페르소나 생성</button><button id="selectCreatedPersona" type="button" hidden>새 페르소나 선택</button><span id="personaCreateMessage" class="small" aria-live="polite"></span></div>
+          </div>
+        </details>
+        <details id="settings" class="management-panel settings-panel">
+          <summary><span><b>환경 설정</b><small>현재 런타임과 로컬 우선 개인정보 보호 상태를 확인합니다.</small></span><span class="summary-chevron">⌄</span></summary>
+          <div class="management-content">
+            <p id="settingsRuntime" class="small">구성 불러오는 중</p>
+            <p class="small">음성·대화 데이터는 이 화면에 연결된 로컬 서비스 설정을 따릅니다. 대화 중에는 관리 작업을 잠급니다.</p>
           </div>
         </details>
       </section>
