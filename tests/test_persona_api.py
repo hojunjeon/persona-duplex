@@ -77,6 +77,26 @@ def test_persona_get_post_validation_duplicate_and_persistence(tmp_path: Path) -
         assert any(item["id"] == "custom-reviewer" for item in config["personas"])
 
 
+def test_persona_create_accepts_basic_fields_only(tmp_path: Path) -> None:
+    app = load_app(tmp_path)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/personas",
+            json={
+                "name": "간단한 도우미",
+                "identity": "짧고 정확한 검토 도우미",
+                "relationship": "사용자의 협력자",
+            },
+        )
+
+    assert response.status_code == 201
+    created = response.json()["persona"]
+    assert created["name"] == "간단한 도우미"
+    assert created["identity"] == "짧고 정확한 검토 도우미"
+    assert created["source"] == "custom"
+    assert (tmp_path / f"{created['id']}.yaml").is_file()
+
+
 def _receive_json(ws):
     message = ws.receive()
     if message.get("text") is None:
@@ -118,13 +138,24 @@ def test_static_persona_create_contract() -> None:
     script = (ROOT / "gateway" / "app" / "static" / "app.js").read_text(encoding="utf-8")
     assert 'id="personaSelect"' in html
     assert 'id="personaCreatePanel"' in html
-    for field in ("personaName", "personaIdentity", "personaRelationship", "personaSpeakingStyle", "personaBehavior", "personaBoundaries", "personaBackchannels", "personaMaxSentences", "createPersona"):
+    for field in ("personaName", "personaIdentity", "personaRelationship", "personaSpeakingStyle", "personaBehavior", "personaBoundaries", "personaBackchannels", "personaMaxSentences", "createPersona", "selectCreatedPersona", "personaAdvancedPanel"):
         assert f'id="{field}"' in html
+    assert 'id="personaName"' in html and 'id="personaName" maxlength="200" autocomplete="off" required' in html
+    assert 'id="personaIdentity"' in html and 'required' in html.split('id="personaIdentity"', 1)[1].split("/>", 1)[0]
+    assert 'id="personaRelationship"' in html and 'required' in html.split('id="personaRelationship"', 1)[1].split("/>", 1)[0]
+    assert '<summary>고급 설정 (선택, 기본값 사용)</summary>' in html
+    assert 'id="selectCreatedPersona" type="button" hidden' in html
     assert 'api("/api/personas"' in script
     assert 'type: "session.configure"' in script
     assert "activePersonaId" in script
     assert "voice_profile_id" in script
     assert "const previousPersonaId = state.selectedPersona" in script
     assert "refreshPersonas(previousPersonaId)" in script
-    assert "기존 선택을 유지했습니다" in script
+    assert "현재 선택은 유지했습니다" in script
+    assert "state.createdPersonaId" in script
+    assert "selectPersona(state.createdPersonaId)" in script
+    assert "startConversation()" in script
+    selection_logic = script.split("function selectPersona", 1)[1].split("async function submitPersona", 1)[0]
+    assert "startConversation" not in selection_logic
+    assert "기존 선택을 유지했습니다" not in script
     assert "refreshPersonas(response.persona?.id || \"\")" not in script

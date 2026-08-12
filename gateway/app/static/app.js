@@ -5,6 +5,7 @@ const state = {
   config: null,
   personas: [],
   selectedPersona: "",
+  createdPersonaId: "",
   creatingPersona: false,
   activePersonaId: "",
   voices: [],
@@ -240,6 +241,7 @@ function sendControl(payload) {
 function setPersonaControlsDisabled(disabled) {
   $("personaSelect").disabled = disabled;
   $("createPersona").disabled = disabled || state.creatingPersona;
+  $("selectCreatedPersona").disabled = disabled || !state.createdPersonaId;
   $("personaCreatePanel").classList.toggle("disabled", disabled);
 }
 
@@ -286,6 +288,20 @@ function setPersonaCreateMessage(text, isError = false) {
   element.className = isError ? "small error" : "small";
 }
 
+function selectPersona(id) {
+  if (state.ws) return;
+  const persona = state.personas.find((item) => item.id === id);
+  if (!persona) throw new Error("선택할 페르소나를 찾지 못했습니다. 목록을 새로고침하세요.");
+  state.selectedPersona = persona.id;
+  $("personaSelect").value = persona.id;
+  if (state.createdPersonaId === persona.id) {
+    state.createdPersonaId = "";
+    $("selectCreatedPersona").hidden = true;
+    $("selectCreatedPersona").disabled = true;
+  }
+  setPersonaCreateMessage(`선택 완료: ${persona.name}. 대화를 시작하려면 대화 시작을 누르세요.`);
+}
+
 async function submitPersona() {
   if (state.creatingPersona || state.ws) return;
   const name = $("personaName").value.trim();
@@ -317,7 +333,12 @@ async function submitPersona() {
       body: JSON.stringify(payload),
     });
     await refreshPersonas(previousPersonaId);
-    setPersonaCreateMessage(`생성 완료: ${response.persona?.name || name}. 기존 선택을 유지했습니다. 목록에서 새 페르소나를 직접 선택한 뒤 대화를 시작하세요.`);
+    const createdPersona = response.persona || {};
+    state.createdPersonaId = createdPersona.id || "";
+    const selectButton = $("selectCreatedPersona");
+    selectButton.hidden = !state.createdPersonaId;
+    selectButton.disabled = !state.createdPersonaId;
+    setPersonaCreateMessage(`생성 완료: ${createdPersona.name || name}. 현재 선택은 유지했습니다. 새 페르소나를 사용하려면 옆의 선택 버튼을 누르세요.`);
   } finally {
     state.creatingPersona = false;
     setPersonaControlsDisabled(Boolean(state.ws));
@@ -339,7 +360,17 @@ async function refreshVoices(selectId = null) {
     const useButton = document.createElement("button");
     useButton.textContent = "선택";
     useButton.onclick = () => selectVoice(id);
-    card.append(label, useButton);
+    const editButton = document.createElement("button");
+    editButton.textContent = "편집";
+    editButton.onclick = () => editVoice(id).catch((error) => setMessage(error.message, true));
+    const deleteButton = document.createElement("button");
+    deleteButton.textContent = "삭제";
+    deleteButton.className = "danger";
+    deleteButton.onclick = () => deleteVoice(id).catch((error) => setMessage(error.message, true));
+    const actions = document.createElement("div");
+    actions.className = "voice-card-actions";
+    actions.append(useButton, editButton, deleteButton);
+    card.append(label, actions);
     card.dataset.profileId = id;
     $("voiceList").appendChild(card);
 
@@ -348,7 +379,10 @@ async function refreshVoices(selectId = null) {
     option.textContent = voice.display_name || id;
     $("voiceSelect").appendChild(option);
   }
-  const target = selectId || state.selectedVoice || state.voices[0]?.profile_id || "";
+  const preferred = selectId || state.selectedVoice || "";
+  const target = state.voices.some((voice) => voice.profile_id === preferred)
+    ? preferred
+    : (state.voices[0]?.profile_id || "");
   selectVoice(target);
 }
 
@@ -358,6 +392,35 @@ function selectVoice(id) {
   for (const card of $("voiceList").children) {
     card.classList.toggle("selected", card.dataset.profileId === state.selectedVoice);
   }
+}
+
+async function editVoice(id) {
+  if (state.ws) throw new Error("대화 중에는 목소리 프로필을 수정할 수 없습니다.");
+  const profile = state.voices.find((voice) => voice.profile_id === id);
+  if (!profile) throw new Error("목소리 프로필을 찾을 수 없습니다.");
+  const displayName = window.prompt("프로필 이름", profile.display_name || "내 목소리");
+  if (displayName === null) return;
+  const transcript = window.prompt("참조 대본", profile.transcript || "");
+  if (transcript === null) return;
+  const response = await api(`/api/voices/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName, transcript }),
+  });
+  await refreshVoices(id);
+  setMessage(`프로필 수정 완료: ${response.display_name || displayName}`);
+}
+
+async function deleteVoice(id) {
+  if (state.ws) throw new Error("대화 중에는 목소리 프로필을 삭제할 수 없습니다.");
+  const profile = state.voices.find((voice) => voice.profile_id === id);
+  if (!profile) throw new Error("목소리 프로필을 찾을 수 없습니다.");
+  if (!window.confirm(`\"${profile.display_name || id}\" 프로필을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+  const wasSelected = state.selectedVoice === id;
+  await api(`/api/voices/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (wasSelected) state.selectedVoice = "";
+  await refreshVoices();
+  setMessage(`프로필 삭제 완료: ${profile.display_name || id}`);
 }
 
 function referenceExtension(filename) {
@@ -504,7 +567,7 @@ async function enrollVoice() {
   form.append("transcript", transcript);
   form.append("display_name", displayName);
   form.append("consent", "true");
-  setMessage("프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.");
+  setMessage("업로드한 녹음으로 프로필 생성 중. 첫 등록은 모델 준비 때문에 오래 걸릴 수 있습니다.");
   const profile = await api("/api/voices/enroll", { method: "POST", body: form });
   const qualityWarnings = profile.audio_quality?.warnings || [];
   const qualityText = qualityWarnings.length ? ` 녹음 경고: ${qualityWarnings.join(" ")}` : "";
@@ -776,6 +839,13 @@ function bindEvents() {
     state.selectedPersona = $("personaSelect").value;
   };
   $("createPersona").onclick = () => submitPersona().catch((e) => setPersonaCreateMessage(e.message, true));
+  $("selectCreatedPersona").onclick = () => {
+    try {
+      selectPersona(state.createdPersonaId);
+    } catch (error) {
+      setPersonaCreateMessage(error.message, true);
+    }
+  };
   $("startConversation").onclick = () => startConversation().catch((e) => appendBubble("system", e.message));
   $("stopConversation").onclick = stopConversation;
   window.addEventListener("beforeunload", () => {

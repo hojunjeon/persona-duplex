@@ -4,11 +4,13 @@ import csv
 import json
 import os
 import re
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,12 +25,23 @@ STATIC_DIR = APP_DIR / "static"
 VOICE_MAX_UPLOAD_BYTES = int(os.getenv("VOICE_MAX_UPLOAD_BYTES", str(32 * 1024 * 1024)))
 VOICE_ALLOWED_SUFFIXES = {".webm", ".wav", ".mp4", ".m4a", ".ogg", ".opus"}
 
+# Mock mode still models the same profile lifecycle as the real Qwen service.
+_mock_voice_profiles: dict[str, dict[str, Any]] = {
+    "mock-voice": {
+        "profile_id": "mock-voice",
+        "display_name": "Mock voice",
+        "transcript": "Mock voice reference transcript.",
+        "seconds": 8.0,
+        "consent_recorded": True,
+    }
+}
+
 app = FastAPI(title=settings.app_name, version="1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.client_origin] if settings.client_origin != "*" else ["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -172,6 +185,50 @@ def _validate_voice_enrollment(
     return filename, normalized_transcript, normalized_name
 
 
+def _validate_profile_id(profile_id: str) -> str:
+    value = str(profile_id or "").strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{4,80}", value):
+        raise HTTPException(status_code=400, detail="잘못된 목소리 프로필 ID입니다.")
+    return value
+
+
+def _normalize_voice_update(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="목소리 프로필 수정값이 올바르지 않습니다.")
+    updates: dict[str, str] = {}
+    if "display_name" in payload:
+        display_name = re.sub(r"\s+", " ", str(payload.get("display_name") or "")).strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="프로필 이름을 입력하세요.")
+        if len(display_name) > 80:
+            raise HTTPException(status_code=400, detail="프로필 이름은 80자 이하여야 합니다.")
+        updates["display_name"] = display_name
+    if "transcript" in payload:
+        transcript = re.sub(r"\s+", " ", str(payload.get("transcript") or "")).strip()
+        if len(transcript) < 5 or len(transcript) > 1000:
+            raise HTTPException(status_code=400, detail="참조 대본은 5~1000자여야 합니다.")
+        updates["transcript"] = transcript
+    if not updates:
+        raise HTTPException(status_code=400, detail="수정할 프로필 메타데이터가 없습니다.")
+    return updates
+
+
+async def _read_voice_update(request: Request) -> dict[str, str]:
+    content_type = request.headers.get("content-type", "").lower()
+    try:
+        if "application/json" in content_type:
+            payload = await request.json()
+        elif "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+            form = await request.form()
+            payload = dict(form)
+        else:
+            raw = await request.body()
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="목소리 프로필 수정값을 읽지 못했습니다.") from exc
+    return _normalize_voice_update(payload)
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     result: dict[str, Any] = {"ok": True, "gateway": "ok"}
@@ -260,7 +317,7 @@ async def save_benchmark_sample(
 @app.get("/api/voices")
 async def list_voices() -> Any:
     if settings.tts_mode == "mock":
-        return [{"profile_id": "mock-voice", "display_name": "Mock voice", "seconds": 8.0}]
+        return list(_mock_voice_profiles.values())
     return await _service_json("GET", f"{settings.tts_http_url}/profiles")
 
 
@@ -276,13 +333,16 @@ async def enroll_voice(
     )
     payload = await _read_upload_limited(audio)
     if settings.tts_mode == "mock":
-        return {
-            "profile_id": "mock-voice",
+        profile_id = f"mock-voice-{uuid.uuid4().hex[:8]}"
+        profile = {
+            "profile_id": profile_id,
             "display_name": display_name,
             "transcript": transcript,
             "seconds": 8.0,
             "consent_recorded": True,
         }
+        _mock_voice_profiles[profile_id] = profile
+        return profile
     files = {"audio": (filename, payload, audio.content_type or "application/octet-stream")}
     data = {"transcript": transcript, "display_name": display_name, "consent": str(consent).lower()}
     return await _service_json("POST", f"{settings.tts_http_url}/profiles", files=files, data=data)
@@ -290,14 +350,34 @@ async def enroll_voice(
 
 @app.post("/api/voices/{profile_id}/warmup")
 async def warm_voice(profile_id: str) -> Any:
+    profile_id = _validate_profile_id(profile_id)
     if settings.tts_mode == "mock":
+        if profile_id not in _mock_voice_profiles:
+            raise HTTPException(status_code=404, detail="목소리 프로필을 찾을 수 없습니다.")
         return {"ok": True, "profile_id": profile_id, "seconds": 0.0}
     return await _service_json("POST", f"{settings.tts_http_url}/profiles/{profile_id}/warmup")
 
 
+@app.patch("/api/voices/{profile_id}")
+async def update_voice(profile_id: str, request: Request) -> Any:
+    profile_id = _validate_profile_id(profile_id)
+    updates = await _read_voice_update(request)
+    if settings.tts_mode == "mock":
+        profile = _mock_voice_profiles.get(profile_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="목소리 프로필을 찾을 수 없습니다.")
+        profile.update(updates)
+        profile["updated_at"] = int(time.time())
+        return profile
+    return await _service_json("PATCH", f"{settings.tts_http_url}/profiles/{profile_id}", json=updates)
+
+
 @app.delete("/api/voices/{profile_id}")
 async def delete_voice(profile_id: str) -> Any:
+    profile_id = _validate_profile_id(profile_id)
     if settings.tts_mode == "mock":
+        if _mock_voice_profiles.pop(profile_id, None) is None:
+            raise HTTPException(status_code=404, detail="목소리 프로필을 찾을 수 없습니다.")
         return {"ok": True, "profile_id": profile_id}
     return await _service_json("DELETE", f"{settings.tts_http_url}/profiles/{profile_id}")
 

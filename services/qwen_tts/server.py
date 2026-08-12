@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
 MODEL_ID = os.getenv("TTS_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
@@ -127,6 +127,42 @@ def _read_profile(profile_id: str) -> dict[str, Any]:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["audio_path"] = str(path / "reference.wav")
     return metadata
+
+
+def _normalize_profile_update(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="목소리 프로필 수정값이 올바르지 않습니다.")
+    updates: dict[str, str] = {}
+    if "display_name" in payload:
+        display_name = re.sub(r"\s+", " ", str(payload.get("display_name") or "")).strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="프로필 이름을 입력하세요.")
+        if len(display_name) > 80:
+            raise HTTPException(status_code=400, detail="프로필 이름은 80자 이하여야 합니다.")
+        updates["display_name"] = display_name
+    if "transcript" in payload:
+        transcript = re.sub(r"\s+", " ", str(payload.get("transcript") or "")).strip()
+        if len(transcript) < 5 or len(transcript) > 1000:
+            raise HTTPException(status_code=400, detail="참조 대본은 5~1000자여야 합니다.")
+        updates["transcript"] = transcript
+    if not updates:
+        raise HTTPException(status_code=400, detail="수정할 프로필 메타데이터가 없습니다.")
+    return updates
+
+
+async def _read_profile_update(request: Request) -> dict[str, str]:
+    content_type = request.headers.get("content-type", "").lower()
+    try:
+        if "application/json" in content_type:
+            payload = await request.json()
+        elif "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+            payload = dict(await request.form())
+        else:
+            raw = await request.body()
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="목소리 프로필 수정값을 읽지 못했습니다.") from exc
+    return _normalize_profile_update(payload)
 
 
 def _sha256(path: Path) -> str:
@@ -457,6 +493,28 @@ def warm_profile(profile_id: str) -> dict[str, Any]:
         "backend": backend,
         "seconds": time.perf_counter() - started,
     }
+
+
+@app.patch("/profiles/{profile_id}")
+async def update_profile(profile_id: str, request: Request) -> dict[str, Any]:
+    updates = await _read_profile_update(request)
+    path = _profile_path(profile_id)
+    metadata_path = path / "metadata.json"
+    profile = _read_profile(profile_id)
+    key_before = _prompt_key(profile)
+    metadata = {key: value for key, value in profile.items() if key != "audio_path"}
+    metadata.update(updates)
+    metadata["updated_at"] = int(time.time())
+    temp_path = metadata_path.with_suffix(".json.tmp")
+    temp_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(metadata_path)
+    key_after = _prompt_key(metadata)
+    with _model_lock:
+        _prompt_cache.pop(key_before, None)
+        if key_after != key_before:
+            _prompt_cache.pop(key_after, None)
+    metadata["audio_path"] = str(path / "reference.wav")
+    return metadata
 
 
 @app.delete("/profiles/{profile_id}")
