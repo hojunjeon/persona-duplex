@@ -505,7 +505,7 @@ async def update_profile(profile_id: str, request: Request) -> dict[str, Any]:
     metadata = {key: value for key, value in profile.items() if key != "audio_path"}
     metadata.update(updates)
     metadata["updated_at"] = int(time.time())
-    temp_path = metadata_path.with_suffix(".json.tmp")
+    temp_path = metadata_path.with_name(f".metadata.{uuid.uuid4().hex}.tmp")
     temp_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(metadata_path)
     key_after = _prompt_key(metadata)

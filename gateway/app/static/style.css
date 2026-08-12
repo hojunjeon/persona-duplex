@@ -45,8 +45,8 @@ h1 { margin: 0; font-size: 25px; }
 .conversation { min-height: 690px; display: grid; grid-template-rows: auto 1fr auto auto; }
 .controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 9px; align-items: end; }
 .persona-create { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0f151f; }
-.persona-create summary { cursor: pointer; padding: 10px 12px; color: var(--accent); font-size: 13px; }
-.persona-create[open] summary { border-bottom: 1px solid var(--line); }
+.persona-create > summary { cursor: pointer; padding: 10px 12px; color: var(--accent); font-size: 13px; }
+.persona-create[open] > summary { border-bottom: 1px solid var(--line); }
 .persona-create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px 12px 2px; }
 .persona-create-grid .field { margin-bottom: 8px; }
 .persona-basic-grid { padding-bottom: 0; }
