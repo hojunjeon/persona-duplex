@@ -17,7 +17,11 @@ echo.
 echo Persona Duplex mode: %PERSONA_MODE%
 echo Press Ctrl+C to stop all Docker services started by this launcher.
 echo.
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0persona-duplex.ps1" -Action run -Mode "%PERSONA_MODE%"
+if /I "%PERSONA_MODE%"=="stop" (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0persona-duplex.ps1" -Action stop
+) else (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0persona-duplex.ps1" -Action run -Mode "%PERSONA_MODE%"
+)
 set "PERSONA_EXIT_CODE=%ERRORLEVEL%"
 
 if not "%PERSONA_EXIT_CODE%"=="0" (

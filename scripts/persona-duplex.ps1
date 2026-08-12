@@ -7,6 +7,9 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
+$script:TunnelProcess = $null
+$script:PublicTunnelUrl = $null
+$script:TunnelKind = $null
 
 function Ensure-Env {
   if (-not (Test-Path ".env")) {
@@ -174,6 +177,255 @@ function Ensure-LlmReady {
   }
 }
 
+function Get-CloudflaredPath {
+  if (-not [string]::IsNullOrWhiteSpace($env:CLOUDFLARED_PATH) -and (Test-Path -LiteralPath $env:CLOUDFLARED_PATH)) {
+    return (Resolve-Path -LiteralPath $env:CLOUDFLARED_PATH).Path
+  }
+  $candidates = @(@(
+    (Join-Path ${env:ProgramFiles} "cloudflared\cloudflared.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "cloudflared\cloudflared.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "cloudflared\cloudflared.exe")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+  if ($candidates.Count -gt 0) { return @($candidates)[0] }
+  $command = Get-Command cloudflared -ErrorAction SilentlyContinue
+  if ($command -and $command.Path) { return $command.Path }
+  if ($command -and $command.Source) { return $command.Source }
+  return $null
+}
+
+function Get-TailscalePath {
+  if (-not [string]::IsNullOrWhiteSpace($env:TAILSCALE_PATH) -and (Test-Path -LiteralPath $env:TAILSCALE_PATH)) {
+    return (Resolve-Path -LiteralPath $env:TAILSCALE_PATH).Path
+  }
+  $candidates = @(
+    (Join-Path ${env:ProgramFiles} "Tailscale\tailscale.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Tailscale\tailscale.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Tailscale\tailscale.exe")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+  if ($candidates.Count -gt 0) { return @($candidates)[0] }
+  $command = Get-Command tailscale.exe -ErrorAction SilentlyContinue
+  if ($command -and $command.Path) { return $command.Path }
+  if ($command -and $command.Source) { return $command.Source }
+  return $null
+}
+
+function Get-TailscaleFunnelUrl([string]$TailscalePath) {
+  $jsonText = (& $TailscalePath funnel status --json 2>$null | Out-String).Trim()
+  if ([string]::IsNullOrWhiteSpace($jsonText)) { return $null }
+  try {
+    $status = $jsonText | ConvertFrom-Json
+    $entry = $status.Web.PSObject.Properties | Select-Object -First 1
+    if ($entry -and $entry.Name) {
+      return "https://$($entry.Name -replace ':443$','')"
+    }
+  } catch {}
+  return $null
+}
+
+function Get-NpxPath {
+  $command = Get-Command npx.cmd -ErrorAction SilentlyContinue
+  if ($command -and $command.Path) { return $command.Path }
+  $candidates = @(@(
+    (Join-Path ${env:ProgramFiles} "nodejs\npx.cmd"),
+    (Join-Path ${env:ProgramFiles(x86)} "nodejs\npx.cmd"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\nodejs\npx.cmd")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+  if ($candidates.Count -gt 0) { return $candidates[0] }
+  return $null
+}
+
+function Get-NodePath {
+  $command = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($command -and $command.Path) { return $command.Path }
+  $candidates = @(@(
+    (Join-Path ${env:ProgramFiles} "nodejs\node.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "nodejs\node.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\nodejs\node.exe")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+  if ($candidates.Count -gt 0) { return $candidates[0] }
+  return $null
+}
+
+function Get-LocalTunnelScript {
+  $candidates = @(@(
+    (Join-Path ${env:APPDATA} "npm\node_modules\localtunnel\bin\lt.js"),
+    (Join-Path ${env:ProgramFiles} "nodejs\node_modules\localtunnel\bin\lt.js")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+  if ($candidates.Count -gt 0) { return $candidates[0] }
+  return $null
+}
+
+function Start-PublicTunnel {
+  Import-DotEnv ".env"
+  $tunnelMode = if ([string]::IsNullOrWhiteSpace($env:PUBLIC_TUNNEL)) { "tailscale" } else { $env:PUBLIC_TUNNEL.ToLowerInvariant() }
+  if ($tunnelMode -in @("off", "none", "false", "0")) {
+    Write-Host "외부 터널: 비활성화 (PUBLIC_TUNNEL=$tunnelMode)"
+    return
+  }
+  $script:TunnelKind = $tunnelMode
+  $port = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+
+  if ($tunnelMode -eq "tailscale") {
+    $tailscale = Get-TailscalePath
+    if (-not $tailscale) {
+      throw "Tailscale을 찾지 못했습니다. Tailscale을 설치하고 로그인한 뒤 다시 실행하세요."
+    }
+    Write-Host "Tailscale Funnel을 시작합니다 (127.0.0.1:$port)..."
+    & $tailscale funnel --bg $port 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "Tailscale Funnel 시작 실패입니다. `tailscale funnel $port`를 직접 확인하세요."
+    }
+    $script:TunnelKind = "tailscale"
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+      Start-Sleep -Seconds 1
+      $script:PublicTunnelUrl = Get-TailscaleFunnelUrl $tailscale
+    } while ([string]::IsNullOrWhiteSpace($script:PublicTunnelUrl) -and (Get-Date) -lt $deadline)
+    if ([string]::IsNullOrWhiteSpace($script:PublicTunnelUrl)) {
+      Stop-PublicTunnel
+      throw "Tailscale Funnel URL을 확인하지 못했습니다. `tailscale funnel status`를 확인하세요."
+    }
+
+    $healthReady = $false
+    $healthDeadline = (Get-Date).AddSeconds(45)
+    do {
+      try {
+        Invoke-RestMethod -Uri "$($script:PublicTunnelUrl)/api/health" -TimeoutSec 8 | Out-Null
+        $healthReady = $true
+        break
+      } catch { Start-Sleep -Seconds 2 }
+    } while ((Get-Date) -lt $healthDeadline)
+    if (-not $healthReady) {
+      $failedUrl = $script:PublicTunnelUrl
+      Stop-PublicTunnel
+      throw "Tailscale Funnel URL은 생성됐지만 외부 Health 요청이 시간 초과했습니다: $failedUrl"
+    }
+    Write-Host "Public UI: $script:PublicTunnelUrl"
+    Write-Host "Public Health: $script:PublicTunnelUrl/api/health"
+    return
+  }
+
+  $executable = $null
+  $arguments = $null
+  $urlPattern = $null
+  $workingDirectory = $Root
+  $timeoutSec = 120
+  switch ($tunnelMode) {
+    "localtunnel" {
+      $localTunnelScript = Get-LocalTunnelScript
+      if ($localTunnelScript) {
+        $executable = Get-NodePath
+        if (-not $executable) { throw "Node.js가 없습니다. Node.js를 설치하세요." }
+        $arguments = @($localTunnelScript, "--port", $port, "--local-host", "127.0.0.1")
+        $workingDirectory = Split-Path -Parent $executable
+      } else {
+        $executable = Get-NpxPath
+        if (-not $executable) { throw "npx가 없습니다. Node.js를 설치하세요." }
+        $arguments = @("--yes", "localtunnel", "--port", $port, "--local-host", "127.0.0.1")
+        $workingDirectory = Split-Path -Parent $executable
+      }
+      $urlPattern = "https://[a-z0-9-]+\.loca\.lt"
+      break
+    }
+    "quick" {
+      $executable = Get-CloudflaredPath
+      if (-not $executable) {
+        throw "cloudflared가 없습니다. `winget install --id Cloudflare.cloudflared --exact`를 먼저 실행하세요."
+      }
+      $arguments = @("tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:$port")
+      $urlPattern = "https://[a-z0-9-]+\.trycloudflare\.com"
+      $workingDirectory = Split-Path -Parent $executable
+      $timeoutSec = 45
+      break
+    }
+    default { throw "지원하지 않는 PUBLIC_TUNNEL 값입니다: $tunnelMode (tailscale, localtunnel, quick 또는 off 사용)" }
+  }
+  $logDir = Join-Path $env:TEMP "persona-duplex-public-tunnel"
+  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+  $stdoutPath = Join-Path $logDir "stdout.log"
+  $stderrPath = Join-Path $logDir "stderr.log"
+  Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+  Write-Host "외부 터널을 시작합니다..."
+  if ([string]::IsNullOrWhiteSpace($workingDirectory)) { $workingDirectory = $Root }
+  $script:TunnelProcess = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $workingDirectory -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  do {
+    Start-Sleep -Seconds 1
+    $output = ""
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+      if (Test-Path -LiteralPath $path) {
+        try { $output += "`n" + (Get-Content -Raw -LiteralPath $path -ErrorAction SilentlyContinue) } catch {}
+      }
+    }
+    if ($output -match $urlPattern) {
+      $script:PublicTunnelUrl = $Matches[0].TrimEnd(".")
+      break
+    }
+    if ($script:TunnelProcess.HasExited) { break }
+  } while ((Get-Date) -lt $deadline)
+
+  if ([string]::IsNullOrWhiteSpace($script:PublicTunnelUrl)) {
+    $errorText = if (Test-Path -LiteralPath $stderrPath) { Get-Content -Raw -LiteralPath $stderrPath } else { "출력 없음" }
+    Stop-PublicTunnel
+    throw "외부 터널 시작 실패: $errorText"
+  }
+
+  $healthReady = $false
+  $healthDeadline = (Get-Date).AddSeconds(45)
+  do {
+    try {
+      Invoke-RestMethod -Uri "$($script:PublicTunnelUrl)/api/health" -TimeoutSec 8 | Out-Null
+      $healthReady = $true
+      break
+    } catch { Start-Sleep -Seconds 2 }
+  } while ((Get-Date) -lt $healthDeadline)
+  if (-not $healthReady) {
+    $failedUrl = $script:PublicTunnelUrl
+    Stop-PublicTunnel
+    throw "외부 터널 URL은 생성됐지만 외부 Health 요청이 시간 초과했습니다: $failedUrl"
+  }
+  Write-Host "Public UI: $script:PublicTunnelUrl"
+  Write-Host "Public Health: $script:PublicTunnelUrl/api/health"
+}
+
+function Stop-PublicTunnel {
+  $configuredTunnelMode = "tailscale"
+  try {
+    Import-DotEnv ".env"
+    if (-not [string]::IsNullOrWhiteSpace($env:PUBLIC_TUNNEL)) {
+      $configuredTunnelMode = $env:PUBLIC_TUNNEL.ToLowerInvariant()
+    }
+  } catch {}
+  if ($script:TunnelProcess) {
+    try {
+      if (-not $script:TunnelProcess.HasExited) { & taskkill.exe /PID $script:TunnelProcess.Id /T /F *> $null }
+    } catch {}
+  }
+  $shouldResetTailscale = $script:TunnelKind -eq "tailscale" -or ([string]::IsNullOrWhiteSpace($script:TunnelKind) -and $configuredTunnelMode -eq "tailscale")
+  if ($shouldResetTailscale) {
+    $tailscale = Get-TailscalePath
+    if ($tailscale) {
+      try { & $tailscale funnel reset *> $null } catch {}
+    }
+  }
+  $script:TunnelProcess = $null
+  $script:PublicTunnelUrl = $null
+  $script:TunnelKind = $null
+}
+
+function Try-StartPublicTunnel {
+  try {
+    Start-PublicTunnel
+    return $true
+  } catch {
+    $message = $_.Exception.Message
+    Stop-PublicTunnel
+    Write-Warning "외부 터널을 사용할 수 없어 로컬 UI로 계속합니다: $message"
+    return $false
+  }
+}
+
 function Complete-RealStart([switch]$Asr, [switch]$Tts, [switch]$Foreground, [string[]]$Services) {
   Ensure-QwenReady -Asr:$Asr -Tts:$Tts
   Ensure-LlmReady
@@ -293,8 +545,17 @@ if ($Action -eq "doctor") {
 if ($Action -eq "start") {
   Ensure-Env
   Ensure-Docker
-  Start-RequestedMode $Mode
-  Write-UiUrls
+  try {
+    Start-RequestedMode $Mode
+    $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Try-StartPublicTunnel | Out-Null
+    Write-UiUrls
+  } catch {
+    Stop-PublicTunnel
+    Stop-AllServices
+    throw
+  }
   exit 0
 }
 
@@ -303,9 +564,14 @@ if ($Action -eq "run") {
   Ensure-Docker
   Write-Host "Persona Duplex를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
   try {
-    Start-RequestedMode $Mode -Foreground
+    Start-RequestedMode $Mode
+    $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Try-StartPublicTunnel | Out-Null
     Write-UiUrls
+    Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200
   } finally {
+    Stop-PublicTunnel
     Write-Host "실행된 Persona Duplex 서비스를 종료합니다..."
     Stop-AllServices
   }
@@ -313,7 +579,7 @@ if ($Action -eq "run") {
 }
 
 switch ($Action) {
-  "stop" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans }
+  "stop" { Stop-PublicTunnel; Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans }
   "logs" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200 }
   "status" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm ps }
   "build" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm build }

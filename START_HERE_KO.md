@@ -74,6 +74,8 @@ http://localhost:8080
 
 더블클릭으로 전체 실행하고 `Ctrl+C`로 종료하려면 프로젝트 폴더의 `persona-duplex.bat`을 실행합니다. Docker Desktop이 꺼져 있으면 실행기가 먼저 시작하고, 기본 모드 `balanced`로 Ollama·ASR·TTS 모델이 준비될 때까지 자동으로 대기합니다. Compose 서비스는 재부팅 후 자동 시작하지 않으며, 종료 시 실행기가 `docker compose down --remove-orphans`로 해당 스택을 정리합니다. `mock`은 실전 실행 경로가 아닌 자동화 테스트용입니다.
 
+기본 실행은 Tailscale Funnel로 외부 주소도 출력합니다. 원본 서버는 로컬 `127.0.0.1:8080`에 남고, 외부에는 게이트웨이 8080만 공개됩니다. `Ctrl+C` 또는 `persona-duplex.bat stop`을 실행하면 서비스와 Funnel이 함께 종료됩니다. 로컬에서만 쓰려면 `.env`에 `PUBLIC_TUNNEL=off`를 설정하세요. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 외부 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
+
 클라우드 STT를 쓸 때는 `.env`에 해당 키를 입력한 뒤 실행합니다.
 
 ```powershell
