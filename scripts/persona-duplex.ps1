@@ -1,5 +1,5 @@
 ﻿param(
-  [ValidateSet("doctor", "start", "run", "stop", "logs", "status", "build", "help")]
+  [ValidateSet("doctor", "docker-on", "docker-off", "start", "run", "stop", "logs", "status", "build", "help")]
   [string]$Action = "help",
   [ValidateSet("balanced", "accuracy", "selected", "cloud-stt", "cloud-elevenlabs", "cloud-soniox", "cloud-deepgram")]
   [string]$Mode = "balanced"
@@ -74,12 +74,42 @@ function Ensure-Docker {
   throw "Docker Desktop 데몬 준비 시간 초과입니다. Docker Desktop 상태를 확인하세요."
 }
 
+function Require-Docker {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker CLI가 없습니다." }
+  if (-not (Test-DockerReady)) {
+    throw "Docker가 켜져 있지 않습니다. 먼저 docker-on.bat을 실행하세요."
+  }
+}
+
+function Stop-Docker {
+  $stopped = $false
+  if (Get-Command docker -ErrorAction SilentlyContinue) {
+    try {
+      & docker desktop stop *> $null
+      $stopped = ($LASTEXITCODE -eq 0)
+    } catch {}
+  }
+
+  if (-not $stopped) {
+    $desktopProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "Docker Desktop" }
+    if ($desktopProcesses) {
+      $desktopProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+      $stopped = $true
+    }
+  }
+
+  if ($stopped) {
+    Write-Host "Docker Desktop을 종료했습니다."
+  } else {
+    Write-Host "Docker Desktop이 이미 종료되어 있습니다."
+  }
+}
+
 function Wait-Http([string]$Url, [int]$TimeoutSec = 180) {
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   do {
     try {
-      Invoke-RestMethod -Uri $Url -TimeoutSec 5 | Out-Null
-      return
+      return Invoke-RestMethod -Uri $Url -TimeoutSec 5
     } catch {
       Start-Sleep -Seconds 2
     }
@@ -95,6 +125,28 @@ function Invoke-Warmup([string]$Url, [int]$TimeoutSec = 900) {
   }
 }
 
+function Invoke-WarmupWithRetry([string]$Url, [int]$TimeoutSec = 900) {
+  try {
+    Invoke-Warmup $Url $TimeoutSec
+  } catch {
+    Write-Warning "모델 준비에 실패해 한 번 더 확인합니다: $Url"
+    Invoke-Warmup $Url $TimeoutSec
+  }
+}
+
+function Ensure-QwenServiceReady([string]$Name, [string]$BaseUrl) {
+  $health = Wait-Http "$BaseUrl/health" 240
+  if ($health.loaded) {
+    Write-Host "$Name 모델이 이미 준비되어 있습니다."
+    return
+  }
+
+  Write-Host "$Name 모델을 준비합니다..."
+  Invoke-WarmupWithRetry "$BaseUrl/warmup" 900
+  $health = Wait-Http "$BaseUrl/health" 30
+  if (-not $health.loaded) { throw "$Name 모델이 준비되지 않았습니다." }
+}
+
 function Verify-RealStack([string]$RequestedMode) {
   Import-DotEnv ".env"
   $selectedStt = ""
@@ -104,18 +156,15 @@ function Verify-RealStack([string]$RequestedMode) {
   }
   if ($RequestedMode -in @("balanced", "accuracy") -or $selectedStt -eq "qwen_ws") {
     $asrPort = if ($env:ASR_PORT) { $env:ASR_PORT } else { "8101" }
-    Wait-Http "http://127.0.0.1:$asrPort/health" 240
-    Invoke-Warmup "http://127.0.0.1:$asrPort/warmup" 900
+    Ensure-QwenServiceReady "Qwen ASR" "http://127.0.0.1:$asrPort"
   }
   if ($RequestedMode -in @("balanced", "accuracy", "selected", "cloud-stt", "cloud-elevenlabs", "cloud-soniox", "cloud-deepgram")) {
     $ttsPort = if ($env:TTS_PORT) { $env:TTS_PORT } else { "8102" }
-    Wait-Http "http://127.0.0.1:$ttsPort/health" 240
-    Invoke-Warmup "http://127.0.0.1:$ttsPort/warmup" 900
+    Ensure-QwenServiceReady "Qwen TTS" "http://127.0.0.1:$ttsPort"
   }
   Ensure-LlmReady
   $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-  Wait-Http "http://127.0.0.1:$gatewayPort/api/health" 180
-  $health = Invoke-RestMethod -Uri "http://127.0.0.1:$gatewayPort/api/health" -TimeoutSec 15
+  $health = Wait-Http "http://127.0.0.1:$gatewayPort/api/health" 180
   if (-not $health.ok) { throw "실전 스택 health가 통과하지 못했습니다: $($health | ConvertTo-Json -Depth 6 -Compress)" }
   Write-Host "Real stack: Qwen/LLM health OK"
 }
@@ -139,7 +188,7 @@ function Ensure-Ollama {
     Write-Host "Ollama 서버를 시작합니다..."
     $ollamaComposeArgs = @("--profile", "local-llm", "up", "-d", "ollama")
     Invoke-Compose @ollamaComposeArgs
-    Wait-Http "$ollamaBase/api/tags" 180
+    Wait-Http "$ollamaBase/api/tags" 180 | Out-Null
   }
 
   $models = Invoke-RestMethod -Uri "$ollamaBase/api/tags" -TimeoutSec 10
@@ -157,31 +206,6 @@ function Ensure-Ollama {
   $models = Invoke-RestMethod -Uri "$ollamaBase/api/tags" -TimeoutSec 10
   $found = @($models.models | Where-Object { $_.name -eq $env:LLM_MODEL -or $_.model -eq $env:LLM_MODEL })
   if ($found.Count -eq 0) { throw "Ollama 모델을 찾지 못했습니다: $env:LLM_MODEL" }
-}
-
-function Ensure-QwenReady([switch]$Asr, [switch]$Tts) {
-  if ([string]::IsNullOrWhiteSpace($env:ASR_PORT)) { $env:ASR_PORT = "8101" }
-  if ([string]::IsNullOrWhiteSpace($env:TTS_PORT)) { $env:TTS_PORT = "8102" }
-
-  if ($Asr) {
-    $base = "http://127.0.0.1:$($env:ASR_PORT)"
-    Wait-Http "$base/health" 180
-    Write-Host "Qwen ASR 모델을 warmup합니다..."
-    Invoke-Warmup "$base/warmup" 900
-    $health = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
-    if (-not $health.loaded) { throw "Qwen ASR 모델이 로드되지 않았습니다." }
-    Write-Host "Qwen ASR 준비 완료: $($health.model) / $($health.device)"
-  }
-
-  if ($Tts) {
-    $base = "http://127.0.0.1:$($env:TTS_PORT)"
-    Wait-Http "$base/health" 180
-    Write-Host "Qwen TTS 모델을 warmup합니다..."
-    Invoke-Warmup "$base/warmup" 900
-    $health = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
-    if (-not $health.loaded) { throw "Qwen TTS 모델이 로드되지 않았습니다." }
-    Write-Host "Qwen TTS 준비 완료: $($health.model) / $($health.loaded_backend)"
-  }
 }
 
 function Ensure-LlmReady {
@@ -439,9 +463,7 @@ function Stop-PublicTunnel {
   $script:TunnelKind = $null
 }
 
-function Complete-RealStart([switch]$Asr, [switch]$Tts, [switch]$Foreground, [string[]]$Services) {
-  Ensure-QwenReady -Asr:$Asr -Tts:$Tts
-  Ensure-LlmReady
+function Complete-RealStart([switch]$Foreground, [string[]]$Services) {
   if ($Foreground) {
     $logArgs = @("--profile", "local-asr", "--profile", "local-tts", "--profile", "local-llm", "logs", "-f", "--tail=200") + $Services
     Invoke-Compose @logArgs
@@ -452,23 +474,6 @@ function Invoke-Up([string[]]$Profiles, [string[]]$Services, [switch]$Foreground
   $composeArgs = @()
   foreach ($profile in $Profiles) { $composeArgs += @("--profile", $profile) }
   $composeArgs += @("up")
-  # The gateway serves source files from the image. Always rebuild local
-  # source-backed services so a launcher restart cannot keep an older image
-  # and hide newly implemented UI/API features.
-  $buildRequired = $false
-  foreach ($service in $Services) {
-    $image = switch ($service) {
-      "gateway" { "persona-duplex-gateway"; break }
-      "qwen-asr" { "persona-duplex-qwen-asr"; break }
-      "qwen-tts" { "persona-duplex-qwen-tts"; break }
-      default { $null }
-    }
-    if ($image) {
-      $buildRequired = $true
-      & docker image inspect $image *> $null
-    }
-  }
-  if ($buildRequired) { $composeArgs += "--build" }
   if (-not $Foreground) { $composeArgs += "-d" }
   $composeArgs += $Services
   Invoke-Compose @composeArgs
@@ -479,7 +484,7 @@ function Start-Local([string]$Model, [string]$MemoryUtil, [switch]$Foreground) {
   $env:ASR_MODEL_ID=$Model
   $env:ASR_GPU_MEMORY_UTILIZATION=$MemoryUtil
   Invoke-Up -Profiles @("local-asr", "local-tts") -Services @("gateway", "qwen-asr", "qwen-tts")
-  Complete-RealStart -Asr -Tts -Foreground:$Foreground -Services @("gateway", "qwen-asr", "qwen-tts")
+  Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-asr", "qwen-tts")
 }
 
 function Stop-LocalAsrQuietly {
@@ -491,7 +496,7 @@ function Start-Cloud([string]$SttMode, [string]$Model, [string]$KeyName, [switch
   Stop-LocalAsrQuietly
   $env:STT_MODE=$SttMode; $env:STT_CLOUD_MODEL=$Model; $env:TTS_MODE="qwen_ws"; $env:LLM_MODE="openai_compatible"
   Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts")
-  Complete-RealStart -Tts -Foreground:$Foreground -Services @("gateway", "qwen-tts")
+  Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-tts")
 }
 
 function Start-Selected([switch]$Foreground) {
@@ -504,11 +509,11 @@ function Start-Selected([switch]$Foreground) {
     "qwen_ws" {
       if (-not $env:ASR_MODEL_ID) { $env:ASR_MODEL_ID="Qwen/Qwen3-ASR-1.7B" }
       Invoke-Up -Profiles @("local-asr", "local-tts") -Services @("gateway", "qwen-asr", "qwen-tts")
-      Complete-RealStart -Asr -Tts -Foreground:$Foreground -Services @("gateway", "qwen-asr", "qwen-tts")
+      Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-asr", "qwen-tts")
     }
-    "elevenlabs_ws" { Require-Key "ELEVENLABS_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Tts -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
-    "soniox_ws" { Require-Key "SONIOX_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Tts -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
-    "deepgram_ws" { Require-Key "DEEPGRAM_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Tts -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
+    "elevenlabs_ws" { Require-Key "ELEVENLABS_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
+    "soniox_ws" { Require-Key "SONIOX_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
+    "deepgram_ws" { Require-Key "DEEPGRAM_API_KEY"; Stop-LocalAsrQuietly; Invoke-Up -Profiles @("local-tts") -Services @("gateway", "qwen-tts"); Complete-RealStart -Foreground:$Foreground -Services @("gateway", "qwen-tts") }
     default { throw "selected_stt.env의 STT_MODE을 지원하지 않습니다: $env:STT_MODE" }
   }
 }
@@ -535,7 +540,7 @@ function Write-UiUrls {
 
 function Stop-AllServices {
   try {
-    Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans
+    Invoke-Compose --profile local-asr --profile local-tts --profile local-llm stop
   } catch {
     Write-Warning "종료 정리 중 오류: $($_.Exception.Message)"
   }
@@ -543,7 +548,7 @@ function Stop-AllServices {
 
 if ($Action -eq "doctor") {
   Write-Host "== Persona Duplex doctor =="
-  Ensure-Docker
+  Require-Docker
   & docker compose version
   if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
     & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
@@ -553,13 +558,23 @@ if ($Action -eq "doctor") {
   exit 0
 }
 
+if ($Action -eq "docker-on") {
+  Ensure-Docker
+  exit 0
+}
+
+if ($Action -eq "docker-off") {
+  Stop-Docker
+  exit 0
+}
+
 if ($Action -eq "start") {
   Ensure-Env
-  Ensure-Docker
+  Require-Docker
   try {
     Start-RequestedMode $Mode
     $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180 | Out-Null
     Verify-RealStack $Mode
     Start-PublicTunnel
     Write-UiUrls
@@ -573,12 +588,12 @@ if ($Action -eq "start") {
 
 if ($Action -eq "run") {
   Ensure-Env
-  Ensure-Docker
+  Require-Docker
   Write-Host "Persona Duplex를 포그라운드로 실행합니다. 종료하려면 Ctrl+C를 누르세요."
   try {
     Start-RequestedMode $Mode
     $gatewayPort = if ($env:GATEWAY_PORT) { $env:GATEWAY_PORT } else { "8080" }
-    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180
+    Wait-Http "http://127.0.0.1:$gatewayPort/api/config" 180 | Out-Null
     Verify-RealStack $Mode
     Start-PublicTunnel
     Write-UiUrls
@@ -592,22 +607,24 @@ if ($Action -eq "run") {
 }
 
 switch ($Action) {
-  "stop" { Stop-PublicTunnel; Invoke-Compose --profile local-asr --profile local-tts --profile local-llm down --remove-orphans }
+  "stop" { Stop-PublicTunnel; Invoke-Compose --profile local-asr --profile local-tts --profile local-llm stop }
   "logs" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm logs -f --tail=200 }
   "status" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm ps }
   "build" { Invoke-Compose --profile local-asr --profile local-tts --profile local-llm build }
   default {
     Write-Host @"
 Usage:
-  .\persona-duplex.ps1 doctor
-  .\persona-duplex.ps1 start balanced
-  .\persona-duplex.ps1 start accuracy
-  .\persona-duplex.ps1 start selected
-  .\persona-duplex.ps1 start cloud-elevenlabs
-  .\persona-duplex.ps1 start cloud-soniox
-  .\persona-duplex.ps1 start cloud-deepgram
-  .\persona-duplex.ps1 run balanced
-  .\persona-duplex.ps1 status|logs|stop|build
+  .\scripts\persona-duplex.ps1 docker-on
+  .\scripts\persona-duplex.ps1 docker-off
+  .\scripts\persona-duplex.ps1 doctor
+  .\scripts\persona-duplex.ps1 start balanced
+  .\scripts\persona-duplex.ps1 start accuracy
+  .\scripts\persona-duplex.ps1 start selected
+  .\scripts\persona-duplex.ps1 start cloud-elevenlabs
+  .\scripts\persona-duplex.ps1 start cloud-soniox
+  .\scripts\persona-duplex.ps1 start cloud-deepgram
+  .\scripts\persona-duplex.ps1 run balanced
+  .\scripts\persona-duplex.ps1 status|logs|stop|build
 "@
   }
 }

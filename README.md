@@ -24,6 +24,8 @@ gateway/                 브라우저 UI, 대화 상태 머신, STT/LLM/TTS 어�
 services/qwen_asr/       Qwen3-ASR 스트리밍 WebSocket 서비스
 services/qwen_tts/       음성 등록, prompt cache, 스트리밍 TTS 서비스
 benchmark/               STT 후보 조사·측정·자동 선발
+scripts/                 실제 실행·벤치마크 스크립트
+*.bat                    Windows용 시작·Docker 켜기·Docker 끄기 버튼
 gateway/personas/        페르소나 YAML
 data/voices/             등록한 참조 음성. ZIP에는 비어 있음
 data/benchmark/          사용자 STT 시험 녹음과 결과
@@ -34,27 +36,29 @@ docs/                    설계·튜닝·보안·한계 문서
 
 ```bash
 cp .env.example .env
-./persona-duplex.sh doctor
-./persona-duplex.sh start balanced
+./scripts/persona-duplex.sh doctor
+./scripts/persona-duplex.sh start balanced
 ```
 
 Windows:
 
 ```powershell
 Copy-Item .env.example .env
-.\persona-duplex.ps1 doctor
-.\persona-duplex.ps1 start balanced
+.\scripts\persona-duplex.ps1 doctor
+.\scripts\persona-duplex.ps1 start balanced
 ```
 
 더블클릭 실행기:
 
 ```text
-persona-duplex.bat
+start.bat
+docker-on.bat
+docker-off.bat
 ```
 
-기본값은 `balanced` 모드이며, 실행기가 Docker Desktop과 GPU 런타임을 확인하고 Ollama `qwen3:1.7b` 및 Qwen ASR/TTS 모델을 준비한 뒤 실제 스택이 준비될 때까지 기다립니다. Compose 서비스는 재부팅 후 자동 재시작하지 않으며, 창에서 `Ctrl+C`를 누르면 실행된 서비스가 정리됩니다. `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`은 첫 번째 인자로 선택할 수 있고 모든 실행 모드는 실제 STT·TTS·LLM 공급자만 사용합니다.
+`docker-on.bat`으로 Docker Desktop을 먼저 켠 뒤 `start.bat`을 실행합니다. 기본 모드는 `balanced`이며, `Ctrl+C`는 Persona Duplex 서비스만 멈추고 Docker Desktop은 그대로 둡니다. 실행할 때마다 이미지를 강제로 다시 만들지 않으며, 소스가 바뀌어 다시 만들 필요가 있을 때만 `./scripts/persona-duplex.ps1 build`를 실행합니다. `accuracy`, `selected`, `cloud-elevenlabs`, `cloud-soniox`, `cloud-deepgram`은 `start.bat`의 첫 번째 인자로 선택할 수 있습니다.
 
-실행기 기본값은 Tailscale Funnel(`PUBLIC_TUNNEL=tailscale`)이며, 준비가 끝나면 Tailscale 도메인 외부 주소를 출력합니다. 원본 서버는 계속 `127.0.0.1:8080`에만 바인딩되고, 외부에는 게이트웨이 8080만 공개됩니다. 외부 공개를 끄려면 `.env`에 `PUBLIC_TUNNEL=off`를 설정하세요. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 선택한 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
+실행기 기본값은 Tailscale Funnel(`PUBLIC_TUNNEL=tailscale`)이며, 준비가 끝나면 Tailscale 도메인 외부 주소를 출력합니다. 원본 서버는 계속 `127.0.0.1:8080`에만 바인딩되고, 외부에는 게이트웨이 8080만 공개됩니다. 외부 접속을 계속 사용하려면 `.env`의 `PUBLIC_TUNNEL`을 끄지 마세요. LocalTunnel은 `PUBLIC_TUNNEL=localtunnel`, Cloudflare Quick Tunnel은 `PUBLIC_TUNNEL=quick`으로 선택할 수 있습니다. 선택한 터널이 `/api/health`를 통과하지 못하면 실행기는 실패하고 시작한 서비스도 정리합니다.
 
 UI는 `http://localhost:8080`, STT 녹음 벤치마크는 `http://localhost:8080/benchmark`입니다.
 

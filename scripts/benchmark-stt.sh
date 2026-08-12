@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 ACTION="${1:-help}"
 PROVIDERS="${2:-qwen,elevenlabs,soniox,deepgram}"
@@ -28,10 +28,10 @@ case "$ACTION" in
   *)
     cat <<'USAGE'
 Usage:
-  ./benchmark-stt.sh run [qwen,elevenlabs,soniox,deepgram]
-  ./benchmark-stt.sh select [accuracy|balanced|latency]
-  ./benchmark-stt.sh apply
-  ./benchmark-stt.sh all [providers]
+  ./scripts/benchmark-stt.sh run [qwen,elevenlabs,soniox,deepgram]
+  ./scripts/benchmark-stt.sh select [accuracy|balanced|latency]
+  ./scripts/benchmark-stt.sh apply
+  ./scripts/benchmark-stt.sh all [providers]
 USAGE
     ;;
 esac

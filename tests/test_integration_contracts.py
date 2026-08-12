@@ -207,22 +207,40 @@ def test_voice_sources_are_separate_and_submit_actual_selected_file() -> None:
     assert 'id="enrollVoice"' not in html
 
 
-def test_source_backed_launchers_always_rebuild_images() -> None:
+def test_source_backed_launchers_reuse_existing_images() -> None:
     powershell = (ROOT / "scripts" / "persona-duplex.ps1").read_text(encoding="utf-8")
     invoke_up_start = powershell.index("function Invoke-Up")
     invoke_up_end = powershell.index("function Start-Local", invoke_up_start)
     invoke_up = powershell[invoke_up_start:invoke_up_end]
     assert '$composeArgs += @("up")' in invoke_up
-    assert '$buildRequired = $true' in invoke_up
-    assert '$composeArgs += "--build"' in invoke_up
-    assert 'if ($LASTEXITCODE -ne 0) { $buildRequired = $true }' not in invoke_up
-    for service in ("gateway", "qwen-asr", "qwen-tts"):
-        assert f'"{service}"' in invoke_up
+    assert '"--build"' not in invoke_up
+    assert '$composeArgs += $Services' in invoke_up
 
     bash = (ROOT / "scripts" / "persona-duplex.sh").read_text(encoding="utf-8")
-    assert re.search(r"compose .* up --build -d gateway", bash)
-    assert re.search(r"compose .* up --build -d gateway qwen-asr qwen-tts", bash)
-    assert re.search(r"compose .* up --build -d gateway qwen-tts", bash)
+    assert "up --build" not in bash
+    assert re.search(r"compose .* up -d gateway", bash)
+    assert re.search(r"compose .* up -d gateway qwen-asr qwen-tts", bash)
+    assert re.search(r"compose .* up -d gateway qwen-tts", bash)
+
+
+def test_windows_launchers_keep_entrypoints_at_root() -> None:
+    start = (ROOT / "start.bat").read_text(encoding="utf-8")
+    docker_on = (ROOT / "docker-on.bat").read_text(encoding="utf-8")
+    docker_off = (ROOT / "docker-off.bat").read_text(encoding="utf-8")
+    assert 'scripts\\persona-duplex.ps1" -Action run' in start
+    assert 'scripts\\persona-duplex.ps1" -Action docker-on' in docker_on
+    assert 'scripts\\persona-duplex.ps1" -Action docker-off' in docker_off
+    assert "docker desktop stop" not in start
+    assert "docker compose down" not in start
+
+
+def test_launcher_stops_only_persona_services_and_retries_failed_warmup() -> None:
+    powershell = (ROOT / "scripts" / "persona-duplex.ps1").read_text(encoding="utf-8")
+    shell = (ROOT / "scripts" / "persona-duplex.sh").read_text(encoding="utf-8")
+    assert "Invoke-Compose --profile local-asr --profile local-tts --profile local-llm stop" in powershell
+    assert "Invoke-WarmupWithRetry" in powershell
+    assert "stop) compose --profile local-asr --profile local-tts --profile local-llm stop" in shell
+    assert "if ! curl -fsS --max-time 900 -X POST" in shell
 
 
 def test_compose_keeps_source_backed_services_buildable() -> None:
