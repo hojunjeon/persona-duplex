@@ -1,0 +1,29 @@
+name: Apply Persona Duplex v2
+
+on:
+  push:
+    branches:
+      - fix/realtime-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply prepared v2 bundle
+        shell: bash
+        run: |
+          cat .persona-v2-bundle/part* | base64 -d > /tmp/persona-v2.tgz
+          tar -xzf /tmp/persona-v2.tgz -C .
+          rm -rf .persona-v2-bundle
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: improve realtime voice conversation and multiturn flow"
+          git push origin HEAD:fix/realtime-v2
